@@ -1,9 +1,17 @@
 name: blue
-version: 0.1.0
+version: 0.4.0
+description: Blue Environment launcher and package manager
+
 authors:
-  - Blue CLI <blue@hackeros.pl>
-crystal: ">= 1.0.0"
+  - HackerOS Team <hackeros068@gmail.com>
+
+targets:
+  blue:
+    main: src/main.cr
+
+dependencies:
+  http:
+    github: crystal-lang/crystal-http
+
+crystal: ">= 1.8.0"
 license: MIT
-description: |
-  CLI tools for Blue Environment
-  (czysta implementacja bez żadnych shardów – tylko stdlib + ręczne ANSI kolory)
