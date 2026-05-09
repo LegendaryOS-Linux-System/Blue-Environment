@@ -1,113 +1,88 @@
-mod state;
 mod input;
-mod render;
 mod ipc;
+mod render;
+mod state;
 mod xwayland;
 
 use std::time::Duration;
-use smithay::backend::session::Session;
-use tracing::{info, error, warn};
-use tracing_subscriber::{EnvFilter, fmt};
-use std::fs;
-
-fn init_logging() {
-    let home = dirs::home_dir().expect("Home directory not found");
-    let log_dir = home.join(".cache/Blue-Environment/.compositor/logs");
-    fs::create_dir_all(&log_dir).ok();
-
-    let log_file = log_dir.join(format!("compositor_{}.log", chrono::Local::now().format("%Y%m%d_%H%M%S")));
-    let file_appender = tracing_appender::rolling::never(log_dir, log_file);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    let subscriber = fmt::Subscriber::builder()
-    .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-    .with_writer(non_blocking)
-    .with_ansi(false)
-    .finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
-}
+use tracing::{error, info, warn};
+use tracing_subscriber::EnvFilter;
 
 fn main() {
-    init_logging();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_env("BLUE_LOG")
+                .unwrap_or_else(|_| EnvFilter::new("blue_compositor=info,smithay=warn")),
+        )
+        .init();
 
-    fmt()
-    .with_env_filter(
-        EnvFilter::try_from_env("BLUE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("blue_compositor=info,smithay=warn")),
-    )
-    .init();
-
-    info!("Blue Compositor starting...");
-
-    // Write .desktop file for display manager
-    if let Err(e) = write_desktop_file() {
-        warn!("Failed to write .desktop file: {}", e);
-    }
+    info!("Blue Compositor v0.4.0 starting...");
+    write_desktop_file();
 
     if std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok() {
-        warn!("Existing display session detected — running nested (winit)");
+        warn!("Existing session detected — nested (winit) mode");
         run_winit();
     } else {
-        info!("TTY mode — using DRM/KMS backend");
+        info!("No display server — DRM/KMS (TTY) mode");
         run_udev();
     }
 }
 
-fn write_desktop_file() -> std::io::Result<()> {
-    let exe_path = std::env::current_exe()?;
-    let desktop_path = dirs::home_dir()
-    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found"))?
-    .join(".local/share/applications/blue-environment.desktop");
-
+fn write_desktop_file() {
+    let Ok(exe) = std::env::current_exe() else { return };
     let content = format!(
-        r#"[Desktop Entry]
-        Name=Blue Environment
-        Comment=Modern Wayland compositor
-        Exec={}
-        Type=Application
-        Categories=System;Utility;
-        "#,
-        exe_path.display()
+        "[Desktop Entry]\nName=Blue Environment\nComment=Blue Wayland Desktop\nExec={}\nType=Application\nDesktopNames=Blue\n",
+        exe.display()
     );
-
-    std::fs::create_dir_all(desktop_path.parent().unwrap())?;
-    std::fs::write(desktop_path, content)?;
-    Ok(())
+    let system = std::path::Path::new("/usr/local/share/wayland-sessions/blue-environment.desktop");
+    let _ = std::fs::create_dir_all(system.parent().unwrap());
+    if std::fs::write(system, &content).is_err() {
+        if let Some(home) = dirs::home_dir() {
+            let local = home.join(".local/share/wayland-sessions/blue-environment.desktop");
+            let _ = std::fs::create_dir_all(local.parent().unwrap());
+            let _ = std::fs::write(local, content);
+        }
+    }
 }
 
 fn run_udev() {
     use smithay::backend::session::libseat::LibSeatSession;
 
-    let (session, _notifier) = match LibSeatSession::new() {
+    let (session, notifier) = match LibSeatSession::new() {
         Ok(s) => s,
         Err(e) => {
-            error!("Failed to create libseat session: {}", e);
-            error!("Make sure seatd is running: sudo systemctl start seatd");
-            error!("And add yourself to seat group: sudo usermod -aG seat $USER");
+            error!("LibSeat failed: {}", e);
+            error!("  sudo systemctl enable --now seatd");
+            error!("  sudo usermod -aG seat $USER && re-login");
             std::process::exit(1);
         }
     };
 
-    info!("Seat: {}", session.seat());
-
-    let event_loop: calloop::EventLoop<'static, state::BlueState> =
-    calloop::EventLoop::try_new().expect("Failed to create event loop");
+    let event_loop: smithay::reexports::calloop::EventLoop<'static, state::BlueState> =
+        smithay::reexports::calloop::EventLoop::try_new().expect("event loop");
     let display: wayland_server::Display<state::BlueState> =
-    wayland_server::Display::new().expect("Failed to create Wayland display");
+        wayland_server::Display::new().expect("display");
 
-    let loop_handle = event_loop.handle();
-    let mut st = state::BlueState::new(&loop_handle, display);
-    st.init_udev(session, &loop_handle);
+    let lh = event_loop.handle();
+    let mut st = state::BlueState::new(&lh, display);
 
-    if let Err(e) = st.init_xwayland(&loop_handle) {
-        error!("Failed to start XWayland: {}", e);
+    // Insert session notifier
+    lh.insert_source(notifier, |_evt, _, _state| {})
+        .expect("session notifier");
+
+    st.init_udev(session, &lh);
+
+    if let Err(e) = st.init_xwayland(&lh) {
+        error!("XWayland failed: {} — X11 apps unavailable", e);
     }
 
-    st.init_ipc(&loop_handle);
+    st.init_ipc(&lh);
 
-    info!("Compositor ready — WAYLAND_DISPLAY={}", st.socket_name());
-    std::env::set_var("WAYLAND_DISPLAY", st.socket_name());
-    std::env::set_var("DISPLAY", format!(":{}", st.x11_display.unwrap_or(0)));
+    let socket = st.socket_name().to_string();
+    std::env::set_var("WAYLAND_DISPLAY", &socket);
+    std::env::set_var("XDG_SESSION_TYPE", "wayland");
+    std::env::set_var("XDG_CURRENT_DESKTOP", "Blue");
+    info!("Compositor ready — WAYLAND_DISPLAY={}", socket);
 
     run_loop(event_loop, st);
 }
@@ -115,34 +90,37 @@ fn run_udev() {
 fn run_winit() {
     use smithay::backend::winit;
 
-    let event_loop: calloop::EventLoop<'static, state::BlueState> =
-    calloop::EventLoop::try_new().expect("Failed to create event loop");
+    let event_loop: smithay::reexports::calloop::EventLoop<'static, state::BlueState> =
+        smithay::reexports::calloop::EventLoop::try_new().expect("event loop");
     let display: wayland_server::Display<state::BlueState> =
-    wayland_server::Display::new().expect("Failed to create Wayland display");
+        wayland_server::Display::new().expect("display");
 
-    let loop_handle = event_loop.handle();
-    let mut st = state::BlueState::new(&loop_handle, display);
+    let lh = event_loop.handle();
+    let mut st = state::BlueState::new(&lh, display);
 
-    let (winit_backend, winit_evt) =
-    winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
-    .expect("Failed to init winit backend");
+    let (backend, evt) =
+        winit::init::<smithay::backend::renderer::gles::GlesRenderer>()
+            .expect("winit init");
 
-    st.init_winit(winit_backend, winit_evt, &loop_handle);
+    st.init_winit(backend, evt, &lh);
 
-    if let Err(e) = st.init_xwayland(&loop_handle) {
-        error!("Failed to start XWayland: {}", e);
+    if let Err(e) = st.init_xwayland(&lh) {
+        error!("XWayland failed: {} — X11 apps unavailable", e);
     }
 
-    st.init_ipc(&loop_handle);
+    st.init_ipc(&lh);
 
-    info!("Nested compositor ready — WAYLAND_DISPLAY={}", st.socket_name());
-    std::env::set_var("WAYLAND_DISPLAY", st.socket_name());
+    let socket = st.socket_name().to_string();
+    std::env::set_var("WAYLAND_DISPLAY", &socket);
+    std::env::set_var("XDG_SESSION_TYPE", "wayland");
+    std::env::set_var("XDG_CURRENT_DESKTOP", "Blue");
+    info!("Nested compositor ready — WAYLAND_DISPLAY={}", socket);
 
     run_loop(event_loop, st);
 }
 
 fn run_loop(
-    mut event_loop: calloop::EventLoop<'static, state::BlueState>,
+    mut event_loop: smithay::reexports::calloop::EventLoop<'static, state::BlueState>,
     mut state: state::BlueState,
 ) {
     loop {
