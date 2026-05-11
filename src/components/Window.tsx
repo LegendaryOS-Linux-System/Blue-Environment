@@ -16,7 +16,7 @@ interface WindowProps {
 
 const TOPBAR_HEIGHT = 48;
 const MIN_WIDTH = 280;
-const MIN_HEIGHT = 200;
+const MIN_HEIGHT = 180;
 
 const Window: React.FC<WindowProps> = ({
     window: win,
@@ -34,29 +34,33 @@ const Window: React.FC<WindowProps> = ({
     const dragOffset = useRef({ x: 0, y: 0 });
     const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
-    // ── Drag ──────────────────────────────────────────────
-    const handleTitleMouseDown = useCallback((e: React.MouseEvent) => {
-        if (win.isMaximized) return;
-        if ((e.target as HTMLElement).closest('button')) return;
-        e.preventDefault();
-        onFocus(win.id);
-        setIsDragging(true);
-        dragOffset.current = { x: e.clientX - win.x, y: e.clientY - win.y };
-    }, [win.isMaximized, win.id, win.x, win.y, onFocus]);
+    const handleTitleMouseDown = useCallback(
+        (e: React.MouseEvent) => {
+            if (win.isMaximized) return;
+            if ((e.target as HTMLElement).closest('button')) return;
+            e.preventDefault();
+            onFocus(win.id);
+            setIsDragging(true);
+            dragOffset.current = { x: e.clientX - win.x, y: e.clientY - win.y };
+        },
+        [win.isMaximized, win.id, win.x, win.y, onFocus]
+    );
 
-    // ── Resize ────────────────────────────────────────────
-    const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onFocus(win.id);
-        setIsResizing(true);
-        resizeStart.current = {
-            x: e.clientX,
-            y: e.clientY,
-            w: win.width,
-            h: win.height,
-        };
-    }, [win.id, win.width, win.height, onFocus]);
+    const handleResizeMouseDown = useCallback(
+        (e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onFocus(win.id);
+            setIsResizing(true);
+            resizeStart.current = {
+                x: e.clientX,
+                y: e.clientY,
+                w: win.width,
+                h: win.height,
+            };
+        },
+        [win.id, win.width, win.height, onFocus]
+    );
 
     useEffect(() => {
         if (!isDragging && !isResizing) return;
@@ -93,21 +97,21 @@ const Window: React.FC<WindowProps> = ({
 
     const style: React.CSSProperties = win.isMaximized
         ? {
-            left: 0,
-            top: TOPBAR_HEIGHT,
-            width: '100vw',
-            height: `calc(100vh - ${TOPBAR_HEIGHT}px)`,
-            borderRadius: 0,
-            border: 'none',
-            zIndex: win.zIndex,
-        }
+              left: 0,
+              top: TOPBAR_HEIGHT,
+              width: '100vw',
+              height: `calc(100vh - ${TOPBAR_HEIGHT}px)`,
+              borderRadius: 0,
+              border: 'none',
+              zIndex: win.zIndex,
+          }
         : {
-            left: win.x,
-            top: win.y,
-            width: win.width,
-            height: win.height,
-            zIndex: win.zIndex,
-        };
+              left: win.x,
+              top: win.y,
+              width: win.width,
+              height: win.height,
+              zIndex: win.zIndex,
+          };
 
     return (
         <div
@@ -132,14 +136,28 @@ const Window: React.FC<WindowProps> = ({
                 onMouseDown={handleTitleMouseDown}
                 onDoubleClick={() => onMaximize(win.id)}
             >
-                {/* Left: indicator + title */}
+                {/* Indicator + title */}
                 <div className="flex items-center gap-2 text-sm font-medium theme-text-primary min-w-0">
-                    <div className={`w-2 h-2 rounded-full shrink-0 transition-colors ${isActive ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]' : 'bg-slate-600'}`} />
+                    <div
+                        className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
+                            isActive
+                                ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]'
+                                : 'bg-slate-600'
+                        }`}
+                    />
                     <span className="truncate">{win.title}</span>
+                    {win.isExternal && (
+                        <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 rounded">
+                            ext
+                        </span>
+                    )}
                 </div>
 
-                {/* Right: window controls */}
-                <div className="flex items-center gap-0.5 shrink-0" onMouseDown={e => e.stopPropagation()}>
+                {/* Window controls */}
+                <div
+                    className="flex items-center gap-0.5 shrink-0"
+                    onMouseDown={e => e.stopPropagation()}
+                >
                     <button
                         onClick={() => onMinimize(win.id)}
                         className="w-7 h-7 flex items-center justify-center hover:bg-white/10 rounded-md theme-text-secondary hover:text-yellow-400 transition-colors"
@@ -169,14 +187,23 @@ const Window: React.FC<WindowProps> = ({
                 {children}
             </div>
 
-            {/* Resize handle (SE corner) */}
+            {/* Resize handle */}
             {!win.isMaximized && (
                 <div
                     className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize z-10 group"
                     onMouseDown={handleResizeMouseDown}
                 >
-                    <svg width="12" height="12" viewBox="0 0 12 12" className="absolute bottom-1 right-1 opacity-30 group-hover:opacity-70 transition-opacity">
-                        <path d="M0 12 L12 0 M4 12 L12 4 M8 12 L12 8" stroke="currentColor" strokeWidth="1.5" />
+                    <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        className="absolute bottom-1 right-1 opacity-30 group-hover:opacity-70 transition-opacity"
+                    >
+                        <path
+                            d="M0 12 L12 0 M4 12 L12 4 M8 12 L12 8"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                        />
                     </svg>
                 </div>
             )}
@@ -184,10 +211,6 @@ const Window: React.FC<WindowProps> = ({
     );
 };
 
-// Deep equality check — only re-render when props actually changed
 export default memo(Window, (prev, next) => {
-    return (
-        prev.window === next.window &&
-        prev.isActive === next.isActive
-    );
+    return prev.window === next.window && prev.isActive === next.isActive;
 });
