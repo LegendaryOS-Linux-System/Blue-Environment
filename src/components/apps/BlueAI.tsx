@@ -1,404 +1,175 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppProps } from '../../types';
 import { SystemBridge } from '../../utils/systemBridge';
-import { useLanguage } from '../../contexts/LanguageContext';
-import { Bot, Sparkles, LogOut, User, Loader2, ChevronDown, Key, Send, Settings, Trash2, Copy, Check } from 'lucide-react';
+import { Send, Bot, User, Settings, X, Loader2, Trash2, Copy } from 'lucide-react';
 
-// Typy usług AI
-type AIService = 'chatgpt' | 'grok' | 'claude' | 'gemini' | 'deepseek' | 'local';
+interface AIMessage { role: 'user' | 'assistant'; content: string; }
+interface AIConfig { service: string; model: string; apiKey: string; }
 
-const AI_SERVICES: { id: AIService; name: string; icon: string; models: string[]; requiresKey: boolean }[] = [
-    { id: 'chatgpt', name: 'ChatGPT', icon: '🤖', models: ['gpt-4', 'gpt-3.5-turbo'], requiresKey: true },
-{ id: 'grok', name: 'Grok', icon: '🕹️', models: ['grok-1'], requiresKey: true },
-{ id: 'claude', name: 'Claude', icon: '🐙', models: ['claude-3-opus', 'claude-3-sonnet'], requiresKey: true },
-{ id: 'gemini', name: 'Gemini', icon: '✨', models: ['gemini-pro', 'gemini-1.5-pro'], requiresKey: true },
-{ id: 'deepseek', name: 'DeepSeek', icon: '🔍', models: ['deepseek-chat'], requiresKey: true },
-{ id: 'local', name: 'Local Model', icon: '💻', models: ['llama2', 'mistral'], requiresKey: false },
+const AI_SERVICES = [
+    { id: 'chatgpt',  name: 'ChatGPT',        models: ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo'] },
+    { id: 'claude',   name: 'Claude',          models: ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307'] },
+    { id: 'gemini',   name: 'Gemini',          models: ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-exp'] },
+    { id: 'deepseek', name: 'DeepSeek',        models: ['deepseek-chat', 'deepseek-reasoner'] },
+    { id: 'grok',     name: 'Grok (xAI)',      models: ['grok-2-latest', 'grok-beta'] },
+    { id: 'local',    name: 'Local (Ollama)',  models: ['llama3.2', 'mistral', 'codellama', 'phi3', 'qwen2.5'] },
 ];
 
-interface Message {
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: number;
-}
-
 const BlueAI: React.FC<AppProps> = () => {
-    const { t } = useLanguage();
-    const [selectedService, setSelectedService] = useState<AIService>('chatgpt');
-    const [selectedModel, setSelectedModel] = useState<string>('gpt-4');
-    const [apiKey, setApiKey] = useState<string>('');
-    const [hasKey, setHasKey] = useState(false);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [messages, setMessages] = useState<AIMessage[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [config, setConfig] = useState<AIConfig>({ service: 'chatgpt', model: 'gpt-4o', apiKey: '' });
     const [showSettings, setShowSettings] = useState(false);
-    const [showKeyInput, setShowKeyInput] = useState(false);
-    const [tempKey, setTempKey] = useState('');
     const [error, setError] = useState<string | null>(null);
-    const [copied, setCopied] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    // Załaduj konfigurację AI z backendu
     useEffect(() => {
-        const loadConfig = async () => {
-            const config = await SystemBridge.getAIConfig();
-            if (config) {
-                setSelectedService(config.service as AIService);
-                setSelectedModel(config.model || getDefaultModel(config.service as AIService));
-                setApiKey(config.apiKey || '');
-                setHasKey(!!config.apiKey);
-                if (config.messages) {
-                    setMessages(config.messages);
-                } else {
-                    setMessages([{ role: 'assistant', content: t('ai.welcome'), timestamp: Date.now() }]);
-                }
-            } else {
-                setMessages([{ role: 'assistant', content: t('ai.welcome'), timestamp: Date.now() }]);
-            }
-        };
-        loadConfig();
-    }, [t]);
-
-    const getDefaultModel = (service: AIService): string => {
-        const svc = AI_SERVICES.find(s => s.id === service);
-        return svc?.models[0] || '';
-    };
-
-    // Zapisz konfigurację do backendu
-    const saveConfig = async () => {
-        await SystemBridge.saveAIConfig({
-            service: selectedService,
-            model: selectedModel,
-            apiKey: apiKey,
-            messages: messages,
+        SystemBridge.loadConfig().then(cfg => {
+            const ext = cfg as typeof cfg & { aiConfig?: AIConfig };
+            if (ext.aiConfig) setConfig(ext.aiConfig);
         });
+    }, []);
+
+    useEffect(() => {
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }, [messages, isLoading]);
+
+    const saveConfig = async (newCfg: AIConfig) => {
+        setConfig(newCfg);
+        const appCfg = await SystemBridge.loadConfig();
+        await SystemBridge.saveConfig({ ...appCfg, ...({ aiConfig: newCfg } as object) } as typeof appCfg);
     };
 
-    // Zmień usługę
-    const handleServiceChange = (service: AIService) => {
-        setSelectedService(service);
-        setSelectedModel(getDefaultModel(service));
-        setHasKey(!!apiKey);
-        setShowSettings(false);
-        saveConfig();
-    };
-
-    // Zapisz klucz API
-    const handleSaveKey = () => {
-        setApiKey(tempKey);
-        setHasKey(true);
-        setShowKeyInput(false);
-        saveConfig();
-    };
-
-    // Usuń klucz
-    const handleRemoveKey = async () => {
-        setApiKey('');
-        setHasKey(false);
-        await SystemBridge.saveAIConfig({
-            service: selectedService,
-            model: selectedModel,
-            apiKey: '',
-            messages: messages,
-        });
-    };
-
-    // Wyślij wiadomość do API
     const sendMessage = async () => {
-        if (!input.trim() || isLoading) return;
-        if (AI_SERVICES.find(s => s.id === selectedService)?.requiresKey && !apiKey) {
-            setError('Please set an API key in settings first.');
-            setShowSettings(true);
-            return;
-        }
-
-        const userMessage = input;
+        const text = input.trim();
+        if (!text || isLoading) return;
+        setError(null);
         setInput('');
-        const newMessages = [...messages, { role: 'user', content: userMessage, timestamp: Date.now() }];
+        if (textareaRef.current) textareaRef.current.style.height = '42px';
+        const userMsg: AIMessage = { role: 'user', content: text };
+        const newMessages = [...messages, userMsg];
         setMessages(newMessages);
         setIsLoading(true);
-        setError(null);
-
         try {
-            let response = '';
-            switch (selectedService) {
-                case 'chatgpt':
-                    response = await callChatGPT(apiKey, selectedModel, newMessages);
-                    break;
-                case 'gemini':
-                    response = await callGemini(apiKey, selectedModel, newMessages);
-                    break;
-                case 'deepseek':
-                    response = await callDeepSeek(apiKey, selectedModel, newMessages);
-                    break;
-                case 'grok':
-                    response = await callGrok(apiKey, selectedModel, newMessages);
-                    break;
-                case 'claude':
-                    response = await callClaude(apiKey, selectedModel, newMessages);
-                    break;
-                case 'local':
-                    response = await callLocalModel(selectedModel, newMessages);
-                    break;
-                default:
-                    response = `[${selectedService}] Mock response: ${userMessage}`;
-            }
-            const assistantMessage = { role: 'assistant' as const, content: response, timestamp: Date.now() };
-            setMessages([...newMessages, assistantMessage]);
-        } catch (err: any) {
-            setError(err.message || 'Failed to get response');
+            const bridge = SystemBridge as typeof SystemBridge & {
+                callAI: (p: { service: string; apiKey: string; model: string; messages: AIMessage[] }) => Promise<string>;
+            };
+            const reply = await bridge.callAI({ service: config.service, apiKey: config.apiKey, model: config.model, messages: newMessages });
+            setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'AI request failed');
         } finally {
             setIsLoading(false);
-            saveConfig();
         }
     };
 
-    // Funkcje wywołań API (przez backend Tauri, aby ukryć klucze)
-    const callChatGPT = async (key: string, model: string, history: Message[]): Promise<string> => {
-        const response = await SystemBridge.aiCall({
-            service: 'chatgpt',
-            apiKey: key,
-            model,
-            messages: history.map(m => ({ role: m.role, content: m.content })),
-        });
-        return response;
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     };
 
-    const callGemini = async (key: string, model: string, history: Message[]): Promise<string> => {
-        const response = await SystemBridge.aiCall({
-            service: 'gemini',
-            apiKey: key,
-            model,
-            messages: history,
-        });
-        return response;
-    };
+    const currentService = AI_SERVICES.find(s => s.id === config.service);
 
-    const callDeepSeek = async (key: string, model: string, history: Message[]): Promise<string> => {
-        const response = await SystemBridge.aiCall({
-            service: 'deepseek',
-            apiKey: key,
-            model,
-            messages: history,
-        });
-        return response;
-    };
-
-    const callGrok = async (key: string, model: string, history: Message[]): Promise<string> => {
-        const response = await SystemBridge.aiCall({
-            service: 'grok',
-            apiKey: key,
-            model,
-            messages: history,
-        });
-        return response;
-    };
-
-    const callClaude = async (key: string, model: string, history: Message[]): Promise<string> => {
-        const response = await SystemBridge.aiCall({
-            service: 'claude',
-            apiKey: key,
-            model,
-            messages: history,
-        });
-        return response;
-    };
-
-    const callLocalModel = async (model: string, history: Message[]): Promise<string> => {
-        // Symulacja lokalnego modelu (np. przez Ollama)
-        const response = await SystemBridge.aiCall({
-            service: 'local',
-            model,
-            messages: history,
-        });
-        return response;
-    };
-
-    // Kopiuj ostatnią odpowiedź
-    const copyLastResponse = () => {
-        const last = messages.filter(m => m.role === 'assistant').pop();
-        if (last) {
-            navigator.clipboard.writeText(last.content);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+    const renderContent = (content: string) => content.split(/(```[\s\S]*?```)/g).map((part, i) => {
+        if (part.startsWith('```')) {
+            const lines = part.slice(3).split('\n');
+            const lang = lines[0];
+            const code = lines.slice(1, -1).join('\n');
+            return (
+                <pre key={i} className="bg-slate-950 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono text-green-300 border border-white/5">
+                    {lang && <div className="text-slate-500 text-[10px] mb-1">{lang}</div>}
+                    {code}
+                </pre>
+            );
         }
-    };
-
-    // Wyczyść historię
-    const clearHistory = () => {
-        setMessages([{ role: 'assistant', content: t('ai.welcome'), timestamp: Date.now() }]);
-        saveConfig();
-    };
-
-    // Scroll do dołu
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
-
-    const serviceInfo = AI_SERVICES.find(s => s.id === selectedService);
+        return <span key={i} className="whitespace-pre-wrap">{part}</span>;
+    });
 
     return (
-        <div className="flex flex-col h-full bg-slate-900 text-white">
-        {/* Header */}
-        <div className="p-4 border-b border-white/5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-        <div className="p-2 bg-blue-600 rounded-lg">
-        <Bot size={20} />
-        </div>
-        <div>
-        <h3 className="font-semibold">Blue AI</h3>
-        <div className="relative">
-        <button
-        onClick={() => setShowSettings(!showSettings)}
-        className="text-xs text-blue-300 flex items-center gap-1 hover:underline"
-        >
-        {serviceInfo?.name} {serviceInfo?.icon}
-        <ChevronDown size={12} />
-        </button>
-        </div>
-        </div>
-        </div>
-        <div className="flex items-center gap-2">
-        {hasKey && (
-            <div className="flex items-center gap-1 text-xs text-green-400">
-            <Key size={12} /> Key set
+        <div className="flex flex-col h-full bg-slate-900 text-white overflow-hidden">
+            <div className="shrink-0 h-12 flex items-center justify-between px-4 bg-slate-800 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow"><Bot size={15} /></div>
+                    <span className="font-semibold text-sm">Blue AI</span>
+                    <span className="text-xs text-slate-500">— {currentService?.name} / {config.model}</span>
+                </div>
+                <div className="flex gap-1">
+                    {messages.length > 0 && <button onClick={() => setMessages([])} className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400" title="Clear"><Trash2 size={14} /></button>}
+                    <button onClick={() => setShowSettings(s => !s)} className={`p-1.5 rounded-lg ${showSettings ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-white/10 text-slate-400'}`}><Settings size={16} /></button>
+                </div>
             </div>
-        )}
-        <button onClick={clearHistory} className="p-1.5 hover:bg-white/10 rounded-lg" title="Clear history">
-        <Trash2 size={16} />
-        </button>
-        <button onClick={copyLastResponse} className="p-1.5 hover:bg-white/10 rounded-lg" title="Copy last response">
-        {copied ? <Check size={16} /> : <Copy size={16} />}
-        </button>
-        </div>
-        </div>
 
-        {/* Settings panel */}
-        {showSettings && (
-            <div className="absolute top-14 right-4 w-80 bg-slate-800 border border-white/10 rounded-xl shadow-2xl z-50 p-4 backdrop-blur-sm">
-            <div className="space-y-4">
-            <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">AI Service</label>
-            <select
-            value={selectedService}
-            onChange={(e) => handleServiceChange(e.target.value as AIService)}
-            className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-sm"
-            >
-            {AI_SERVICES.map(s => (
-                <option key={s.id} value={s.id}>{s.name} {s.icon}</option>
-            ))}
-            </select>
-            </div>
-            <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Model</label>
-            <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-sm"
-            disabled={!serviceInfo?.models.length}
-            >
-            {serviceInfo?.models.map(m => (
-                <option key={m} value={m}>{m}</option>
-            ))}
-            </select>
-            </div>
-            {serviceInfo?.requiresKey && (
-                <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">API Key</label>
-                {!hasKey ? (
-                    <div>
-                    <input
-                    type="password"
-                    placeholder="Enter API key"
-                    value={tempKey}
-                    onChange={(e) => setTempKey(e.target.value)}
-                    className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-sm"
-                    />
-                    <button
-                    onClick={handleSaveKey}
-                    className="mt-2 w-full bg-blue-600 hover:bg-blue-500 rounded-lg py-1 text-sm"
-                    >
-                    Save Key
-                    </button>
+            {showSettings && (
+                <div className="shrink-0 border-b border-white/5 bg-slate-800/80 p-4 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1">Service</label>
+                            <select value={config.service} onChange={e => { const svc = AI_SERVICES.find(s => s.id === e.target.value); saveConfig({ ...config, service: e.target.value, model: svc?.models[0] || '' }); }} className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+                                {AI_SERVICES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1">Model</label>
+                            <select value={config.model} onChange={e => saveConfig({ ...config, model: e.target.value })} className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none">
+                                {currentService?.models.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
                     </div>
-                ) : (
-                    <div className="flex items-center gap-2">
-                    <span className="text-green-400 text-sm">✓ Key is set</span>
-                    <button
-                    onClick={handleRemoveKey}
-                    className="text-red-400 text-xs hover:underline"
-                    >
-                    Remove
-                    </button>
-                    </div>
-                )}
+                    {config.service !== 'local' && (
+                        <div>
+                            <label className="text-xs text-slate-400 block mb-1">API Key</label>
+                            <div className="flex gap-2">
+                                <input type="password" id="ai-key" defaultValue={config.apiKey} placeholder="sk-..." className="flex-1 bg-slate-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none" />
+                                <button onClick={() => { const el = document.getElementById('ai-key') as HTMLInputElement; if (el) saveConfig({ ...config, apiKey: el.value }); }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm">Save</button>
+                            </div>
+                        </div>
+                    )}
+                    <button onClick={() => setShowSettings(false)} className="w-full text-center text-xs text-slate-500 hover:text-white pt-1">Close</button>
                 </div>
             )}
-            {!serviceInfo?.requiresKey && (
-                <div className="text-xs text-slate-500">Local model runs on your machine (requires Ollama or similar).</div>
-            )}
-            </div>
-            </div>
-        )}
 
-        {/* Messages area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg, idx) => (
-            <div
-            key={idx}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-            <div
-            className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
-                msg.role === 'user'
-                ? 'bg-blue-600 text-white rounded-br-none'
-                : 'bg-slate-800 text-slate-100 rounded-bl-none'
-            }`}
-            >
-            <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-            <div className="text-[10px] text-slate-400 mt-1 text-right">
-            {new Date(msg.timestamp).toLocaleTimeString()}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.length === 0 && !showSettings && (
+                    <div className="flex flex-col items-center justify-center h-full text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center mb-4 border border-white/5"><Bot size={32} className="text-blue-400" /></div>
+                        <h3 className="text-lg font-semibold mb-1">Blue AI</h3>
+                        <p className="text-slate-400 text-sm max-w-xs">{config.apiKey || config.service === 'local' ? 'Ask me anything.' : 'Open Settings to configure your API key.'}</p>
+                        {!config.apiKey && config.service !== 'local' && <button onClick={() => setShowSettings(true)} className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm">Open Settings</button>}
+                    </div>
+                )}
+                {messages.map((msg, idx) => (
+                    <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        {msg.role === 'assistant' && <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shrink-0 mt-0.5"><Bot size={14} /></div>}
+                        <div className="group max-w-[80%] relative">
+                            <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-md' : 'bg-slate-800 text-slate-100 rounded-bl-md border border-white/5'}`}>
+                                {renderContent(msg.content)}
+                            </div>
+                            <button onClick={() => navigator.clipboard.writeText(msg.content)} className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 bg-black/40 rounded-md"><Copy size={10} /></button>
+                        </div>
+                        {msg.role === 'user' && <div className="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mt-0.5"><User size={14} /></div>}
+                    </div>
+                ))}
+                {isLoading && (
+                    <div className="flex gap-3">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shrink-0"><Bot size={14} /></div>
+                        <div className="bg-slate-800 rounded-2xl rounded-bl-md px-4 py-3 border border-white/5">
+                            <div className="flex gap-1 items-center h-5">{[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${i*150}ms` }} />)}</div>
+                        </div>
+                    </div>
+                )}
+                {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-300 text-sm flex gap-2"><X size={14} className="shrink-0 mt-0.5" />{error}</div>}
             </div>
-            </div>
-            </div>
-        ))}
-        {isLoading && (
-            <div className="flex justify-start">
-            <div className="bg-slate-800 rounded-2xl rounded-bl-none px-4 py-2 flex items-center gap-2">
-            <Loader2 size={14} className="animate-spin" />
-            <span className="text-xs">{t('ai.thinking')}</span>
-            </div>
-            </div>
-        )}
-        {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-400 text-sm">
-            {error}
-            </div>
-        )}
-        <div ref={messagesEndRef} />
-        </div>
 
-        {/* Input area */}
-        <div className="p-4 border-t border-white/5">
-        <div className="flex gap-2">
-        <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-        placeholder={t('ai.placeholder')}
-        disabled={isLoading}
-        className="flex-1 bg-slate-800 border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-        />
-        <button
-        onClick={sendMessage}
-        disabled={isLoading || !input.trim()}
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg disabled:opacity-50 transition-colors"
-        >
-        <Send size={18} />
-        </button>
-        </div>
-        </div>
+            <div className="shrink-0 p-3 border-t border-white/5 bg-slate-800/50">
+                <div className="flex gap-2 items-end">
+                    <textarea ref={textareaRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Ask me anything... (Enter to send)" rows={1} className="flex-1 bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white resize-none focus:outline-none focus:border-blue-500/50 max-h-32 placeholder-slate-500" style={{ minHeight: '42px' }} onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 128) + 'px'; }} />
+                    <button onClick={sendMessage} disabled={!input.trim() || isLoading} className="w-10 h-10 bg-blue-600 hover:bg-blue-500 rounded-xl flex items-center justify-center shrink-0 disabled:opacity-40">
+                        {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    </button>
+                </div>
+                <div className="flex justify-between mt-1.5 px-1"><span className="text-[10px] text-slate-600">Shift+Enter = newline</span><span className="text-[10px] text-slate-600">{messages.length} messages</span></div>
+            </div>
         </div>
     );
 };
