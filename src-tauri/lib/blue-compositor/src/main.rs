@@ -24,16 +24,33 @@ fn init_logging() {
         .init();
 }
 
-fn write_desktop_file() -> std::io::Result<()> {
-    let exe_path = std::env::current_exe()?;
-    let path = dirs::home_dir()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no home"))?
-        .join(".local/share/wayland-sessions/blue-environment.desktop");
-    fs::create_dir_all(path.parent().unwrap())?;
-    fs::write(path, format!(
-        "[Desktop Entry]\nName=Blue Environment\nComment=Blue Wayland Compositor\nExec={}\nType=Application\n",
-        exe_path.display()
-    ))
+fn write_desktop_file() {
+    // v0.5: binaries live in /usr/share/Blue-Environment/
+    let compositor_bin = "/usr/share/Blue-Environment/lib/blue-compositor";
+    let shell_bin = "/usr/share/Blue-Environment/blue-environment";
+
+    // Wayland session desktop file
+    let session_content = format!(
+        "[Desktop Entry]\nName=Blue Environment\nComment=Blue Wayland Compositor + Shell\nExec={}\nType=Application\nDesktopNames=Blue\nVersion=0.5.0\n",
+        compositor_bin
+    );
+    let system_sessions = std::path::Path::new("/usr/share/wayland-sessions/blue-environment.desktop");
+    let _ = std::fs::create_dir_all(system_sessions.parent().unwrap());
+    if std::fs::write(system_sessions, &session_content).is_err() {
+        if let Some(home) = dirs::home_dir() {
+            let local = home.join(".local/share/wayland-sessions/blue-environment.desktop");
+            let _ = std::fs::create_dir_all(local.parent().unwrap());
+            let _ = std::fs::write(local, session_content);
+        }
+    }
+
+    // Application desktop file
+    let app_content = format!(
+        "[Desktop Entry]\nName=Blue Environment\nComment=Blue Desktop Shell\nExec={}\nIcon=/usr/share/Blue-Environment/icon.png\nType=Application\nCategories=System;\n",
+        shell_bin
+    );
+    let _ = std::fs::create_dir_all("/usr/share/applications");
+    let _ = std::fs::write("/usr/share/applications/blue-environment.desktop", &app_content);
 }
 
 fn main() {
@@ -46,9 +63,7 @@ fn main() {
 
     info!("Blue Compositor v0.3 starting...");
 
-    if let Err(e) = write_desktop_file() {
-        warn!("Could not write desktop file: {}", e);
-    }
+    write_desktop_file();
 
     let has_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
     let has_x11 = std::env::var("DISPLAY").is_ok();
