@@ -1,3 +1,4 @@
+import { parseHk, serializeHk, resolveInterpolations, loadHkConfig, saveHkConfig, HkConfig } from './hkParser';
 import { UserConfig } from '../types';
 import { SystemBridge } from './systemBridge';
 
