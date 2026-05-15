@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
     Monitor, Wifi, Bluetooth, Image as ImageIcon, Info, User,
+    Printer, Users, Tv2, HardDrive, Keyboard, MousePointer,
     Palette, Check, RefreshCw, Lock, Unlock, Loader2, Sun, Moon,
-    Battery, Cpu, HardDrive, Eye, EyeOff, Download, Upload, Plus,
+    Battery, Cpu, Eye, EyeOff, Download, Upload, Plus,
     Trash2, Edit, Save, X, Grid, Layers, Droplet, Zap, Wind,
-    PanelBottom, Globe, Package,
+    PanelBottom, Globe, Package, GitBranch,
 } from 'lucide-react';
 import { AppProps, UserConfig, ThemeDefinition, PowerProfile } from '../../types';
 import { SystemBridge } from '../../utils/systemBridge';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { configStore } from '../../utils/configStore';
+import { MonitorsSection, PrintersSection, UsersSection } from '../SettingsSections';
+import AboutApp from './AboutApp';
 
 const BUILTIN_THEMES: Record<string, ThemeDefinition> = {
     'blue-default': { id: 'blue-default', name: 'Blue Glass', type: 'builtin', colors: { primary: '#0f172a', secondary: '#1e293b', text: '#f1f5f9', accent: '#2563eb' } },
@@ -668,21 +671,27 @@ const SettingsApp: React.FC<AppProps> = () => {
                 </div>
             );
 
-            case 'about': return (
+            case 'monitors': return (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <h2 className="text-2xl font-bold text-white">{t('settings.about')}</h2>
-                    <div className="bg-gradient-to-br from-blue-900/50 to-slate-900 p-8 rounded-3xl border border-white/5 flex items-center gap-6">
-                        <div className="w-24 h-24 bg-blue-600 rounded-full flex items-center justify-center shadow-2xl">
-                            <span className="text-4xl font-bold text-white">B</span>
-                        </div>
-                        <div>
-                            <h3 className="text-2xl font-bold text-white">{t('app.name')}</h3>
-                            <p className="text-blue-200">{t('app.version')} 0.4.0 (Production)</p>
-                            <p className="text-slate-400 text-sm mt-2">HackerOS Linux</p>
-                            <p className="text-slate-500 text-xs mt-1">Compositor: Smithay (Wayland) + XWayland</p>
-                            <p className="text-slate-400 text-xs mt-4">© 2026 HackerOS Team</p>
-                        </div>
-                    </div>
+                    <h2 className="text-2xl font-bold text-white">Monitors</h2>
+                    <MonitorsSection />
+                </div>
+            );
+            case 'printers': return (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <h2 className="text-2xl font-bold text-white">Printers</h2>
+                    <PrintersSection />
+                </div>
+            );
+            case 'users': return (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <h2 className="text-2xl font-bold text-white">Users & Groups</h2>
+                    <UsersSection />
+                </div>
+            );
+            case 'about': return (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 -m-8 h-[calc(100%+4rem)]">
+                    <AboutApp windowId="settings-about" />
                 </div>
             );
 
@@ -706,6 +715,9 @@ const SettingsApp: React.FC<AppProps> = () => {
                 <TabButton id="language" icon={Globe} label={t('settings.language')} isActive={activeTab === 'language'} onClick={() => setActiveTab('language')} />
                 <TabButton id="nightLight" icon={Moon} label={t('settings.night_light')} isActive={activeTab === 'nightLight'} onClick={() => setActiveTab('nightLight')} />
                 <TabButton id="apps" icon={Package} label={t('settings.apps')} isActive={activeTab === 'apps'} onClick={() => setActiveTab('apps')} />
+                <TabButton id="monitors" icon={Tv2} label="Monitors" isActive={activeTab === 'monitors'} onClick={() => setActiveTab('monitors')} />
+                <TabButton id="printers" icon={Printer} label="Printers" isActive={activeTab === 'printers'} onClick={() => setActiveTab('printers')} />
+                <TabButton id="users" icon={Users} label="Users" isActive={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                 <TabButton id="accounts" icon={User} label={t('settings.accounts')} isActive={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} />
                 <TabButton id="about" icon={Info} label={t('settings.about')} isActive={activeTab === 'about'} onClick={() => setActiveTab('about')} />
             </div>
