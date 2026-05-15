@@ -18,6 +18,7 @@ export enum AppId {
     BLUE_VIDEOS    = 'blue_videos',
     BLUE_MUSIC     = 'blue_music',
     BLUE_SCREEN    = 'blue_screen',
+    CAMERA         = 'camera',
     EXTERNAL       = 'external',
 }
 
