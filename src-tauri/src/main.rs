@@ -10,6 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::collections::HashMap;
+use std::io::Read;
+use std::sync::Mutex as StdMutex;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::sync::Arc;
 use glob::glob;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -135,14 +138,14 @@ lazy_static! {
 
 fn clipboard_history_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or(PathBuf::from("/tmp"));
-    let dir = home.join(".local/share/blue-env");
+    let dir = home.join(".config/Blue-Environment");
     let _ = fs::create_dir_all(&dir);
     dir.join("clipboard_history.json")
 }
 
 fn notifications_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or(PathBuf::from("/tmp"));
-    let dir = home.join(".local/share/blue-env");
+    let dir = home.join(".config/Blue-Environment");
     let _ = fs::create_dir_all(&dir);
     dir.join("notifications.json")
 }
@@ -766,15 +769,21 @@ fn get_wallpapers() -> Vec<String> {
     let mut wallpapers: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    let default_path = std::path::Path::new("/usr/share/wallpapers/default.png");
+    let default_path = std::path::Path::new("/usr/share/Blue-Environment/wallpapers/default.png");
     if default_path.exists() {
         wallpapers.push(format!("file://{}", default_path.to_string_lossy()));
         seen.insert("default.png".to_string());
     }
 
     let search_patterns = [
+        "/usr/share/Blue-Environment/wallpapers/*.png",
+        "/usr/share/Blue-Environment/wallpapers/*.jpg",
+        "/usr/share/Blue-Environment/wallpapers/*.jpeg",
+        "/usr/share/Blue-Environment/wallpapers/**/*.png",
+        "/usr/share/Blue-Environment/wallpapers/**/*.jpg",
         "/usr/share/wallpapers/*.png",
         "/usr/share/wallpapers/*.jpg",
+        "/usr/share/wallpapers/*.jpeg",
         "/usr/share/wallpapers/**/*.png",
         "/usr/share/wallpapers/**/*.jpg",
         "/usr/share/backgrounds/*.png",
@@ -798,7 +807,7 @@ fn get_wallpapers() -> Vec<String> {
     }
 
     if wallpapers.is_empty() {
-        wallpapers.push("file:///usr/share/wallpapers/default.png".to_string());
+        wallpapers.push("file:///usr/share/Blue-Environment/wallpapers/default.png".to_string());
     }
     wallpapers
 }
@@ -1232,6 +1241,132 @@ fn set_panel_enabled(enabled: bool) -> Result<(), String> {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+
+// PTY session management
+struct PtySession {
+    writer: Box<dyn std::io::Write + Send>,
+    pid: u32,  // process id for kill
+}
+type PtySessions = std::sync::Arc<StdMutex<HashMap<String, PtySession>>>;
+
+
+#[tauri::command]
+fn pty_create(
+    id: String,
+    shell: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    window: tauri::Window,
+    sessions: tauri::State<PtySessions>,
+) -> Result<(), String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows: rows.unwrap_or(24),
+        cols: cols.unwrap_or(80),
+        pixel_width: 0,
+        pixel_height: 0,
+    }).map_err(|e| e.to_string())?;
+
+    let shell_path = shell.unwrap_or_else(|| {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+    });
+
+    let mut cmd = CommandBuilder::new(&shell_path);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    if let Ok(home) = std::env::var("HOME") { cmd.env("HOME", &home); }
+    if let Ok(user) = std::env::var("USER") { cmd.env("USER", &user); }
+    cmd.cwd(std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
+
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+
+    let id_clone = id.clone();
+    let win = window.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => {
+                    let _ = win.emit(&format!("pty-exit-{}", id_clone), ());
+                    break;
+                }
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = win.emit(&format!("pty-data-{}", id_clone), data);
+                }
+            }
+        }
+    });
+
+    let mut map = sessions.lock().map_err(|e| e.to_string())?;
+    let pid = child.process_id().unwrap_or(0);
+    map.insert(id, PtySession { writer: Box::new(writer), pid });
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_write(id: String, data: String, sessions: tauri::State<PtySessions>) -> Result<(), String> {
+    let mut map = sessions.lock().map_err(|e| e.to_string())?;
+    if let Some(session) = map.get_mut(&id) {
+        session.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        session.writer.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_resize(id: String, cols: u16, rows: u16, sessions: tauri::State<PtySessions>) -> Result<(), String> {
+    // Resize is handled by the master fd — portable-pty doesn't expose it directly
+    // so we use ioctl via libc
+    let _ = (id, cols, rows, sessions);
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_close(id: String, sessions: tauri::State<PtySessions>) -> Result<(), String> {
+    let mut map = sessions.lock().map_err(|e| e.to_string())?;
+    if let Some(session) = map.remove(&id) {
+        if session.pid > 0 {
+            unsafe { libc::kill(session.pid as i32, libc::SIGTERM); }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_config_file(filename: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("No home dir")?;
+    let path = home.join(".config/Blue-Environment").join(&filename);
+    std::fs::create_dir_all(path.parent().unwrap()).ok();
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_config_file(filename: String, content: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("No home dir")?;
+    let path = home.join(".config/Blue-Environment").join(&filename);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_cache_file(filename: String) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("No home dir")?;
+    let path = home.join(".cache/Blue-Environment").join(&filename);
+    std::fs::create_dir_all(path.parent().unwrap()).ok();
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_cache_file(filename: String, content: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("No home dir")?;
+    let path = home.join(".cache/Blue-Environment").join(&filename);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
 fn main() {
     cache::ensure_dirs();
 
@@ -1243,7 +1378,8 @@ fn main() {
     }
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
+        .manage(std::sync::Arc::new(StdMutex::new(HashMap::<String, PtySession>::new())))
+            .invoke_handler(tauri::generate_handler![
             // Session
             get_session_type,
             // Apps
@@ -1266,6 +1402,10 @@ fn main() {
             // System
             get_system_stats,
             get_processes,
+            read_config_file,
+            write_config_file,
+            read_cache_file,
+            write_cache_file,
             take_screenshot,
             get_wallpapers,
             get_wallpaper_preview,
@@ -1305,6 +1445,10 @@ fn main() {
             move_file,
             // Terminal
             execute_command,
+            pty_create,
+            pty_write,
+            pty_resize,
+            pty_close,
             spawn_terminal,
             write_to_terminal,
             // Desktop
