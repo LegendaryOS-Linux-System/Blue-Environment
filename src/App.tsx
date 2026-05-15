@@ -337,15 +337,27 @@ const AppContent: React.FC = () => {
 
     // Check if an app is enabled in config
     const isAppEnabled = useCallback((appId: string): boolean => {
+        // Settings and About are always enabled
+        if (appId === AppId.SETTINGS || appId === AppId.ABOUT) return true;
         if (!userConfig?.appsEnabled) return true;
-        const map: Record<string, keyof typeof userConfig.appsEnabled> = {
-            [AppId.AI_ASSISTANT]: 'blueAI',
-            [AppId.BLUE_CODE]: 'blueCode',
-            [AppId.BLUE_SOFTWARE]: 'blueSoftware',
-            [AppId.MAIL]: 'mail',
+        const map: Record<string, string> = {
+            [AppId.AI_ASSISTANT]:   'blueAI',
+            [AppId.BLUE_CODE]:      'blueCode',
+            [AppId.BLUE_SOFTWARE]:  'blueSoftware',
+            [AppId.MAIL]:           'mail',
+            [AppId.CALCULATOR]:     'calculator',
+            [AppId.NOTEPAD]:        'notepad',
+            [AppId.SYSTEM_MONITOR]: 'systemMonitor',
+            [AppId.EXPLORER]:       'explorer',
+            [AppId.TERMINAL]:       'terminal',
+            [AppId.BLUE_WEB]:       'blueWeb',
+            [AppId.CAMERA]:         'camera',
         };
         const key = map[appId];
-        if (key) return userConfig.appsEnabled[key] ?? true;
+        if (key) {
+            const enabled = (userConfig.appsEnabled as Record<string, boolean>)[key];
+            return enabled === undefined ? true : enabled;
+        }
         return true;
     }, [userConfig?.appsEnabled]);
 
@@ -635,6 +647,7 @@ const AppContent: React.FC = () => {
                     isStartMenuOpen={isStartMenuOpen || isFullScreenStartOpen}
                     isClipboardOpen={isClipboardOpen}
                     onToggleClipboard={() => setIsClipboardOpen(prev => !prev)}
+                
                 />
             </div>
 
