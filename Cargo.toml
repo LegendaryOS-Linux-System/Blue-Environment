@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src-tauri",
     "src-tauri/lib/blue-compositor",
+    "game-mode",
 ]
 
 [profile.release]
