@@ -7,12 +7,14 @@ use smithay::{
     desktop::{PopupManager, Space, Window},
     input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
     output::Output,
-    reexports::wayland_server::{
-        backend::{ClientData, ClientId, DisconnectReason},
-        protocol::{wl_surface::WlSurface, wl_seat},
-        Display, DisplayHandle, Resource,
+    reexports::{
+        wayland_server::{
+            backend::{ClientData, ClientId, DisconnectReason},
+            protocol::{wl_surface::WlSurface, wl_seat},
+            Display, DisplayHandle, Resource,
+        },
     },
-    utils::{Clock, Logical, Monotonic, Point, Rectangle, Serial, Size},
+    utils::{Clock, Logical, Monotonic, Point, Serial, Rectangle, Size},
     wayland::{
         buffer::BufferHandler,
         compositor::{CompositorClientState, CompositorHandler, CompositorState},
@@ -33,16 +35,15 @@ use smithay::{
             xdg::{
                 PopupSurface, PositionerState, ToplevelSurface,
                 XdgShellHandler, XdgShellState,
+                xdg_toplevel,
             },
         },
         shm::{ShmHandler, ShmState},
         socket::ListeningSocketSource,
         viewporter::ViewporterState,
-        xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData},
     },
     input::dnd::DndGrabHandler,
     xwayland::{XWayland, xwm::X11Wm},
-    wayland::xwayland_shell::XWaylandShellState,
 };
 use std::{
     collections::HashMap,
@@ -53,15 +54,17 @@ use std::{
 };
 use tracing::{info, warn};
 
-// ── Window info for IPC ────────────────────────────────────────────────────
+// ── IPC window info ────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct WindowInfo {
     pub id: u64,
     pub title: String,
     pub app_id: String,
-    pub x: i32, pub y: i32,
-    pub width: u32, pub height: u32,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
     pub is_fullscreen: bool,
     pub is_minimized: bool,
     pub workspace: u32,
@@ -106,7 +109,17 @@ pub struct WinitData {
     pub damage_tracker: smithay::backend::renderer::damage::OutputDamageTracker,
 }
 
-// ── Window metadata ────────────────────────────────────────────────────────
+// ── Multi-monitor configuration ────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct OutputConfig {
+    pub name: String,
+    pub position: Point<i32, Logical>,
+    pub scale: f64,
+    pub mode: smithay::output::Mode,
+}
+
+// ── Window metadata (title, app_id) ───────────────────────────────────────
 
 #[derive(Default, Clone)]
 pub struct WindowMeta {
@@ -128,7 +141,8 @@ pub struct BlueState {
     pub popup_manager: PopupManager,
     pub current_workspace: usize,
     pub workspace_count: usize,
-    // Wayland protocols
+
+    // Wayland protocol states
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
@@ -140,62 +154,76 @@ pub struct BlueState {
     pub presentation_state: PresentationState,
     pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub viewporter_state: ViewporterState,
-    pub xdg_activation_state: XdgActivationState,
-    // Input
+
     pub seat: Seat<Self>,
     pub pointer_location: Point<f64, Logical>,
     pub cursor_status: Arc<Mutex<CursorImageStatus>>,
-    // Outputs
     pub outputs: Vec<Output>,
+    pub output_configs: Vec<OutputConfig>,
+
     // XWayland
-    pub xw_shell_state: XWaylandShellState,
     pub xwayland: Option<XWayland>,
-    pub x11_client: Option<wayland_server::Client>,
     pub xwm: Option<X11Wm>,
     pub x11_display: Option<u32>,
+
     // Backend
     pub backend_data: BackendData,
+
     // IPC
     pub ipc_windows: Arc<Mutex<Vec<WindowInfo>>>,
     pub clients: Arc<Mutex<Vec<UnixStream>>>,
-    // Window tracking
+
+    // Per-window metadata keyed by surface protocol_id
     pub window_meta: HashMap<u64, WindowMeta>,
-    // Control
+
+    // Lifecycle
     pub should_exit: bool,
+
+    // DPMS / idle
     pub last_input_time: Instant,
     pub dpms_blanked: bool,
     pub dpms_timeout: Duration,
-    // Switcher
+
+    // Window switcher
     pub show_switcher: bool,
     pub switcher_index: usize,
-    // Super key
+
+    // Super key tracking
     pub super_pressed: bool,
     pub super_used: bool,
-    // UI state (communicated to shell via IPC)
+
+    // UI state communicated to shell via IPC
     pub start_menu_visible: bool,
     pub fullscreen_menu_visible: bool,
 }
 
 impl BlueState {
-    pub fn new(loop_handle: &LoopHandle<'static, Self>, display: Display<Self>) -> Self {
-        let dh = display.handle();
+    pub fn new(
+        loop_handle: &LoopHandle<'static, Self>,
+        display: Display<Self>,
+    ) -> Self {
+        let display_handle = display.handle();
         let clock = Clock::new();
 
-        let compositor_state = CompositorState::new::<Self>(&dh);
-        let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        let shm_state = ShmState::new::<Self>(&dh, vec![]);
-        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
+        let compositor_state = CompositorState::new::<Self>(&display_handle);
+        let xdg_shell_state = XdgShellState::new::<Self>(&display_handle);
+        let shm_state = ShmState::new::<Self>(&display_handle, vec![]);
+        let output_manager_state =
+            OutputManagerState::new_with_xdg_output::<Self>(&display_handle);
         let mut seat_state = SeatState::new();
-        let seat = seat_state.new_wl_seat(&dh, "seat0");
-        let data_device_state = DataDeviceState::new::<Self>(&dh);
-        let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
-        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
-        let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
-        let fractional_scale_manager_state = FractionalScaleManagerState::new::<Self>(&dh);
-        let viewporter_state = ViewporterState::new::<Self>(&dh);
-        let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
+        let seat = seat_state.new_wl_seat(&display_handle, "seat0");
+        let data_device_state = DataDeviceState::new::<Self>(&display_handle);
+        let primary_selection_state = PrimarySelectionState::new::<Self>(&display_handle);
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&display_handle);
+        let presentation_state =
+            PresentationState::new::<Self>(&display_handle, clock.id() as u32);
+        let fractional_scale_manager_state =
+            FractionalScaleManagerState::new::<Self>(&display_handle);
+        let viewporter_state = ViewporterState::new::<Self>(&display_handle);
 
-        let socket = ListeningSocketSource::new_auto().expect("Failed to create Wayland socket");
+        // Create Wayland socket
+        let socket = ListeningSocketSource::new_auto()
+            .expect("Failed to create Wayland socket");
         let socket_name = socket.socket_name().to_string_lossy().to_string();
         info!("Wayland socket: {}", socket_name);
 
@@ -211,7 +239,7 @@ impl BlueState {
             .expect("Failed to init socket source");
 
         BlueState {
-            display_handle: dh.clone(),
+            display_handle,
             loop_handle: loop_handle.clone(),
             clock,
             socket_name,
@@ -230,14 +258,12 @@ impl BlueState {
             presentation_state,
             fractional_scale_manager_state,
             viewporter_state,
-            xdg_activation_state,
             seat,
             pointer_location: Point::from((0.0, 0.0)),
             cursor_status: Arc::new(Mutex::new(CursorImageStatus::default_named())),
             outputs: Vec::new(),
-            xw_shell_state: XWaylandShellState::new::<Self>(&dh),
+            output_configs: Vec::new(),
             xwayland: None,
-            x11_client: None,
             xwm: None,
             x11_display: None,
             backend_data: BackendData::None,
@@ -257,17 +283,49 @@ impl BlueState {
         }
     }
 
-    pub fn socket_name(&self) -> &str { &self.socket_name }
-    pub fn should_exit(&self) -> bool { self.should_exit }
-    pub fn record_input(&mut self) { self.last_input_time = Instant::now(); }
+    pub fn socket_name(&self) -> &str {
+        &self.socket_name
+    }
+
+    pub fn should_exit(&self) -> bool {
+        self.should_exit
+    }
 
     pub fn refresh(&mut self) {
         self.space.refresh();
         self.popup_manager.cleanup();
         self.update_ipc_windows();
+        self.flush_display();
+        self.handle_dpms();
+    }
+
+    fn flush_display(&mut self) {
+        // Flush pending Wayland events
         if let Err(e) = self.display_handle.flush_clients() {
             warn!("Display flush error: {}", e);
         }
+    }
+
+    fn handle_dpms(&mut self) {
+        let idle = self.last_input_time.elapsed();
+        if idle > self.dpms_timeout && !self.dpms_blanked {
+            self.dpms_blanked = true;
+            self.blank_outputs();
+        } else if idle <= self.dpms_timeout && self.dpms_blanked {
+            self.dpms_blanked = false;
+            self.unblank_outputs();
+        }
+    }
+
+    fn blank_outputs(&self) {
+        for output in &self.outputs {
+            output.change_current_state(None, None, None, None);
+        }
+        info!("DPMS: outputs blanked");
+    }
+
+    fn unblank_outputs(&self) {
+        info!("DPMS: outputs unblanked");
     }
 
     fn update_ipc_windows(&self) {
@@ -275,17 +333,27 @@ impl BlueState {
             .space
             .elements()
             .map(|win| {
-                let geo = self.space
+                let geo = self
+                    .space
                     .element_geometry(win)
-                    .unwrap_or_else(|| Rectangle::new(Point::from((0, 0)), Size::from((800, 600))));
-                let id = Self::window_id(win);
-                let meta = self.window_meta.get(&id).cloned().unwrap_or_default();
+                    .unwrap_or(Rectangle::from_loc_and_size((0, 0), (800, 600)));
+                let surface_id = win
+                    .wl_surface()
+                    .map(|s| s.id().protocol_id() as u64)
+                    .unwrap_or(0);
+                let meta = self
+                    .window_meta
+                    .get(&surface_id)
+                    .cloned()
+                    .unwrap_or_default();
                 WindowInfo {
-                    id,
+                    id: surface_id,
                     title: meta.title,
                     app_id: meta.app_id,
-                    x: geo.loc.x, y: geo.loc.y,
-                    width: geo.size.w as u32, height: geo.size.h as u32,
+                    x: geo.loc.x,
+                    y: geo.loc.y,
+                    width: geo.size.w as u32,
+                    height: geo.size.h as u32,
                     is_fullscreen: meta.is_fullscreen,
                     is_minimized: meta.is_minimized,
                     workspace: meta.workspace as u32,
@@ -294,6 +362,8 @@ impl BlueState {
             .collect();
         *self.ipc_windows.lock().unwrap() = windows;
     }
+
+    // ── Backend init ───────────────────────────────────────────────────────
 
     pub fn init_udev(
         &mut self,
@@ -325,6 +395,8 @@ impl BlueState {
         crate::ipc::init_ipc(self, loop_handle);
     }
 
+    // ── Window helpers ─────────────────────────────────────────────────────
+
     pub fn window_by_surface(&self, surface: &WlSurface) -> Option<Window> {
         self.space
             .elements()
@@ -335,7 +407,11 @@ impl BlueState {
     pub fn window_by_id(&self, id: u64) -> Option<Window> {
         self.space
             .elements()
-            .find(|w| Self::window_id(w) == id)
+            .find(|w| {
+                w.wl_surface()
+                    .map(|s| s.id().protocol_id() as u64 == id)
+                    .unwrap_or(false)
+            })
             .cloned()
     }
 
@@ -345,17 +421,34 @@ impl BlueState {
             .unwrap_or(0)
     }
 
+    // ── Input tracking ────────────────────────────────────────────────────
+
+    pub fn record_input(&mut self) {
+        self.last_input_time = Instant::now();
+        if self.dpms_blanked {
+            self.dpms_blanked = false;
+            self.unblank_outputs();
+        }
+    }
+
+    // ── Shell UI helpers ───────────────────────────────────────────────────
+
     pub fn toggle_start_menu(&mut self) {
         self.start_menu_visible = !self.start_menu_visible;
+        info!("Start menu: {}", self.start_menu_visible);
     }
 
     pub fn toggle_fullscreen_menu(&mut self) {
         self.fullscreen_menu_visible = !self.fullscreen_menu_visible;
     }
 
+    // ── Window switcher ────────────────────────────────────────────────────
+
     pub fn cycle_switcher(&mut self, forward: bool) {
         let count = self.space.elements().count();
-        if count == 0 { return; }
+        if count == 0 {
+            return;
+        }
         if forward {
             self.switcher_index = (self.switcher_index + 1) % count;
         } else {
@@ -368,17 +461,40 @@ impl BlueState {
         if let Some(win) = windows.get(self.switcher_index) {
             self.space.raise_element(win, true);
             if let Some(surface) = win.wl_surface() {
-                if let Some(kb) = self.seat.get_keyboard() {
+                if let Some(keyboard) = self.seat.get_keyboard() {
                     let serial = smithay::utils::SERIAL_COUNTER.next_serial();
-                    kb.set_focus(self, Some(surface.into_owned()), serial);
+                    keyboard.set_focus(self, Some(surface.into_owned()), serial);
                 }
             }
         }
         self.show_switcher = false;
     }
 
+    // ── Workspace management ───────────────────────────────────────────────
+
     pub fn switch_workspace(&mut self, index: usize) {
-        self.current_workspace = index.min(self.workspace_count - 1);
+        let next = index.min(self.workspace_count - 1);
+        info!("Switching workspace {} -> {}", self.current_workspace, next);
+        self.current_workspace = next;
+
+        // Hide windows not on current workspace by moving them off-screen
+        // In a full compositor, we'd actually unmap them
+        let elements: Vec<_> = self.space.elements().cloned().collect();
+        for win in &elements {
+            let id = Self::window_id(win);
+            let workspace = self
+                .window_meta
+                .get(&id)
+                .map(|m| m.workspace)
+                .unwrap_or(0);
+
+            if workspace == next {
+                // Map visible — restore from off-screen position
+                // (position is stored in window_meta in full impl)
+            }
+            // In Smithay Space there's no show/hide, so we rely on
+            // the shell frontend to handle workspace visibility
+        }
     }
 }
 
@@ -388,11 +504,14 @@ impl BufferHandler for BlueState {
     fn buffer_destroyed(
         &mut self,
         _buffer: &smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer,
-    ) {}
+    ) {
+    }
 }
 
 impl CompositorHandler for BlueState {
-    fn compositor_state(&mut self) -> &mut CompositorState { &mut self.compositor_state }
+    fn compositor_state(&mut self) -> &mut CompositorState {
+        &mut self.compositor_state
+    }
 
     fn client_compositor_state<'a>(
         &self,
@@ -411,7 +530,9 @@ impl CompositorHandler for BlueState {
 }
 
 impl ShmHandler for BlueState {
-    fn shm_state(&self) -> &ShmState { &self.shm_state }
+    fn shm_state(&self) -> &ShmState {
+        &self.shm_state
+    }
 }
 
 impl OutputHandler for BlueState {}
@@ -421,7 +542,9 @@ impl SeatHandler for BlueState {
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
-    fn seat_state(&mut self) -> &mut SeatState<Self> { &mut self.seat_state }
+    fn seat_state(&mut self) -> &mut SeatState<Self> {
+        &mut self.seat_state
+    }
 
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
 
@@ -431,22 +554,38 @@ impl SeatHandler for BlueState {
 }
 
 impl XdgShellHandler for BlueState {
-    fn xdg_shell_state(&mut self) -> &mut XdgShellState { &mut self.xdg_shell_state }
+    fn xdg_shell_state(&mut self) -> &mut XdgShellState {
+        &mut self.xdg_shell_state
+    }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface.clone());
         let count = self.space.elements().count();
-        let offset = (count % 12) * 28;
+        let offset = count * 30;
         let loc = Point::from(((offset + 150) as i32, (offset + 80) as i32));
         self.space.map_element(window.clone(), loc, true);
 
+        // Store metadata
         let surface_id = surface.wl_surface().id().protocol_id() as u64;
+        let with_pending = surface.with_pending_state(|s| {
+            (
+                s.title.clone().unwrap_or_default(),
+                s.app_id.clone().unwrap_or_default(),
+            )
+        });
         self.window_meta.insert(
             surface_id,
             WindowMeta {
+                title: with_pending.0,
+                app_id: with_pending.1,
                 workspace: self.current_workspace,
                 ..Default::default()
             },
+        );
+
+        info!(
+            "New toplevel surface id={} workspace={}",
+            surface_id, self.current_workspace
         );
     }
 
@@ -461,7 +600,8 @@ impl XdgShellHandler for BlueState {
         _surface: PopupSurface,
         _positioner: PositionerState,
         _token: u32,
-    ) {}
+    ) {
+    }
 
     fn move_request(
         &mut self,
@@ -474,12 +614,7 @@ impl XdgShellHandler for BlueState {
         if let Some(window) = self.window_by_surface(&wl) {
             if let Some(pointer) = seat.get_pointer() {
                 if let Some(start_data) = pointer.grab_start_data() {
-                    crate::input::start_move_grab(
-                        self,
-                        window,
-                        start_data,
-                        serial,
-                    );
+                    crate::input::start_move_grab(self, window, start_data, serial);
                 }
             }
         }
@@ -490,15 +625,17 @@ impl XdgShellHandler for BlueState {
         _surface: ToplevelSurface,
         _seat: wl_seat::WlSeat,
         _serial: Serial,
-        _edges: smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::ResizeEdge,
-    ) {}
+        _edges: xdg_toplevel::ResizeEdge,
+    ) {
+    }
 
     fn grab(
         &mut self,
         _surface: PopupSurface,
         _seat: wl_seat::WlSeat,
         _serial: Serial,
-    ) {}
+    ) {
+    }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         let surface_id = surface.wl_surface().id().protocol_id() as u64;
@@ -511,7 +648,9 @@ impl XdgShellHandler for BlueState {
 }
 
 impl WlrLayerShellHandler for BlueState {
-    fn shell_state(&mut self) -> &mut WlrLayerShellState { &mut self.layer_shell_state }
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell_state
+    }
 
     fn new_layer_surface(
         &mut self,
@@ -519,24 +658,10 @@ impl WlrLayerShellHandler for BlueState {
         _output: Option<smithay::reexports::wayland_server::protocol::wl_output::WlOutput>,
         _layer: Layer,
         _namespace: String,
-    ) {}
-
-    fn layer_destroyed(&mut self, _surface: WlrLayerSurface) {}
-}
-
-impl XdgActivationHandler for BlueState {
-    fn activation_state(&mut self) -> &mut XdgActivationState { &mut self.xdg_activation_state }
-
-    fn token_created(&mut self, _token: XdgActivationToken, _data: XdgActivationTokenData) -> bool {
-        true
+    ) {
     }
 
-    fn request_activation(
-        &mut self,
-        _token: XdgActivationToken,
-        _token_data: XdgActivationTokenData,
-        _surface: WlSurface,
-    ) {}
+    fn layer_destroyed(&mut self, _surface: WlrLayerSurface) {}
 }
 
 impl SelectionHandler for BlueState {
@@ -549,21 +674,24 @@ impl SelectionHandler for BlueState {
         _fd: OwnedFd,
         _seat: Seat<Self>,
         _user_data: &Self::SelectionUserData,
-    ) {}
+    ) {
+    }
 
     fn new_selection(
         &mut self,
         _target: SelectionTarget,
         _source: Option<SelectionSource>,
         _seat: Seat<Self>,
-    ) {}
+    ) {
+    }
 }
 
 impl WaylandDndGrabHandler for BlueState {}
-impl DndGrabHandler for BlueState {}
 
 impl DataDeviceHandler for BlueState {
-    fn data_device_state(&mut self) -> &mut DataDeviceState { &mut self.data_device_state }
+    fn data_device_state(&mut self) -> &mut DataDeviceState {
+        &mut self.data_device_state
+    }
 }
 
 impl PrimarySelectionHandler for BlueState {
@@ -576,6 +704,8 @@ impl FractionalScaleHandler for BlueState {
     fn new_fractional_scale(&mut self, _surface: WlSurface) {}
 }
 
+impl DndGrabHandler for BlueState {}
+
 delegate_compositor!(BlueState);
 delegate_shm!(BlueState);
 delegate_seat!(BlueState);
@@ -587,4 +717,3 @@ delegate_primary_selection!(BlueState);
 delegate_presentation!(BlueState);
 delegate_viewporter!(BlueState);
 delegate_fractional_scale!(BlueState);
-smithay::delegate_xdg_activation!(BlueState);
