@@ -3,7 +3,9 @@ resolver = "2"
 members = [
     "src-tauri",
     "src-tauri/lib/blue-compositor",
-    "game-mode",
+    "BEDM/daemon",
+    "BEDM/greeter",
+    "BEDM/pam",
 ]
 
 [profile.release]
