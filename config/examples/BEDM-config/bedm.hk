@@ -1,0 +1,56 @@
+# /etc/bedm/bedm.toml — BEDM Display Manager Configuration
+# Blue Environment Display Manager v1.0.0
+
+# ── Greeter ───────────────────────────────────────────────────────────────
+# Path to the greeter binary
+greeter_path = "/usr/bin/bedm-greeter"
+
+# Virtual terminal to use (1-12)
+vt = 1
+
+# ── Autologin ─────────────────────────────────────────────────────────────
+# Uncomment to enable autologin (skips greeter entirely)
+# autologin_user    = "username"
+# autologin_session = "blue-environment"
+# autologin_delay   = 0
+
+# ── Session timeout ───────────────────────────────────────────────────────
+# Seconds of inactivity before greeter reappears (0 = disabled)
+session_timeout = 0
+
+# ── Appearance ────────────────────────────────────────────────────────────
+# Greeter theme: "blue" | "dark" | "light"
+theme = "blue"
+
+# Background wallpaper (absolute path to PNG/JPG)
+# background = "/usr/share/Blue-Environment/wallpapers/default.png"
+
+# Clock format (strftime)
+clock_format = "%H:%M"
+
+# ── User listing ─────────────────────────────────────────────────────────
+# Show list of users in greeter
+show_user_list = true
+
+# Allow root to log in via greeter
+allow_root = false
+
+# UID range for user listing (normal users only)
+minimum_uid = 1000
+maximum_uid = 65533
+
+# ── Session directories ───────────────────────────────────────────────────
+# Directories to scan for .desktop session files
+sessions_dir = [
+    "/usr/share/wayland-sessions",
+    "/usr/share/xsessions",
+    "/usr/local/share/wayland-sessions",
+    "/usr/local/share/xsessions",
+]
+
+# ── Power commands ────────────────────────────────────────────────────────
+[power]
+shutdown  = "shutdown -h now"
+reboot    = "reboot"
+suspend   = "systemctl suspend"
+hibernate = "systemctl hibernate"
