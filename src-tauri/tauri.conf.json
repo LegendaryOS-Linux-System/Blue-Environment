@@ -1,133 +1,53 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Blue Environment",
+  "version": "0.5.0",
+  "identifier": "org.hackeros.blue-environment",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist",
-    "withGlobalTauri": true
+    "beforeBuildCommand": "mkdir -p src-tauri/icons && cp images/icon.png src-tauri/icons/icon.png && npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "blue-environment",
-    "version": "0.5.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "fs": {
-        "all": true,
-        "scope": [
-          "$HOME/**",
-          "/usr/share/Blue-Environment/**",
-          "/usr/share/wallpapers/**",
-          "/usr/share/backgrounds/**",
-          "/usr/share/**",
-          "/etc/**",
-          "/proc/**",
-          "/tmp/**"
-        ]
-      },
-      "path": {
-        "all": true
-      },
-      "shell": {
-        "all": true,
-        "open": true,
-        "sidecar": true,
-        "scope": [
-          {
-            "name": "sh",
-            "cmd": "sh",
-            "args": true
-          },
-          {
-            "name": "bash",
-            "cmd": "bash",
-            "args": true
-          },
-          {
-            "name": "wmctrl",
-            "cmd": "wmctrl",
-            "args": true
-          },
-          {
-            "name": "xdotool",
-            "cmd": "xdotool",
-            "args": true
-          },
-          {
-            "name": "shutdown",
-            "cmd": "shutdown",
-            "args": true
-          },
-          {
-            "name": "systemctl",
-            "cmd": "systemctl",
-            "args": true
-          },
-          {
-            "name": "nmcli",
-            "cmd": "nmcli",
-            "args": true
-          },
-          {
-            "name": "bluetoothctl",
-            "cmd": "bluetoothctl",
-            "args": true
-          },
-          {
-            "name": "pactl",
-            "cmd": "pactl",
-            "args": true
-          },
-          {
-            "name": "brightnessctl",
-            "cmd": "brightnessctl",
-            "args": true
-          },
-          {
-            "name": "xrandr",
-            "cmd": "xrandr",
-            "args": true
-          },
-          {
-            "name": "flameshot",
-            "cmd": "flameshot",
-            "args": true
-          },
-          {
-            "name": "scrot",
-            "cmd": "scrot",
-            "args": true
-          }
-        ]
-      },
-      "clipboard": {
-        "all": true
-      }
-    },
-    "bundle": {
-      "active": false,
-      "targets": [
-        "appimage"
-      ],
-      "identifier": "com.hackeros.blue-environment",
-      "icon": [
-        "icons/icon.png"
-      ]
-    },
-    "security": {
-      "csp": null
-    },
+  "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
-        "fullscreen": false,
-        "resizable": true,
         "title": "Blue Environment",
-        "width": 1280,
-        "height": 800,
+        "width": 1920,
+        "height": 1080,
+        "resizable": true,
+        "fullscreen": false,
         "decorations": false,
-        "transparent": false
+        "transparent": true,
+        "alwaysOnTop": false
       }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
     ]
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": ["$HOME/**", "/etc/**", "/usr/share/**", "/var/**", "/run/**", "/tmp/**", "/sys/**", "/proc/**"]
+      }
+    },
+    "shell": {
+      "open": true
+    },
+    "dialog": {},
+    "http": {
+      "scope": ["https://*"]
+    },
+    "notification": {},
+    "clipboard-manager": {}
   }
 }
