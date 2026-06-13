@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/hl
 # BEDM — Blue Environment Display Manager
 # One-command installer script
 # Usage: sudo bash install.sh [--autologin username]
