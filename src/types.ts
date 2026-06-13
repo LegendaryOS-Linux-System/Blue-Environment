@@ -83,14 +83,16 @@ export interface AIConfig {
 
 export interface UserConfig {
     wallpaper: string;
-    theme: 'dark' | 'light';
+    // Using string (not literal union) so it is compatible with the
+    // systemBridge.ts UserConfig which also uses string.
+    theme: string;
     themeName: string;
     accentColor: string;
     displayScale: number;
     customThemes?: ThemeDefinition[];
     desktopPath: string;
     panelEnabled: boolean;
-    panelPosition: 'top' | 'bottom' | 'left' | 'right';
+    panelPosition: string;
     panelSize: number;
     panelOpacity: number;
     language: string;
@@ -99,25 +101,22 @@ export interface UserConfig {
     nightLightSchedule: 'manual' | 'sunset';
     nightLightStartHour: number;
     nightLightEndHour: number;
-    appsEnabled?: Partial<AppsEnabled>;
+    // Use Record<string, boolean> to match systemBridge expectations, keep
+    // Partial<AppsEnabled> assignment-compatible via explicit cast where needed.
+    appsEnabled?: Record<string, boolean>;
     aiConfig?: AIConfig;
-    accounts?: {
-        google?: { email: string; name: string; picture: string };
-        apple?: { email: string; name: string };
-        chatgpt?: { email: string; accessToken?: string };
-        grok?: { email: string; accessToken?: string };
-        claude?: { email: string; accessToken?: string };
-        gemini?: { email: string; accessToken?: string };
-        deepseek?: { email: string; accessToken?: string };
-    };
+    accounts?: Record<string, any>;
 }
 
+// ThemeDefinition - colors is Record<string,string> (required) to match
+// systemBridge. The optional specialised shape is handled at call sites.
 export interface ThemeDefinition {
     id: string;
     name: string;
-    type: 'builtin' | 'custom';
+    // 'type' kept optional so systemBridge (which lacks it) stays assignable.
+    type?: 'builtin' | 'custom';
     css?: string;
-    colors?: { primary: string; secondary: string; text: string; accent: string };
+    colors?: Record<string, string>;
 }
 
 export interface PowerProfile {
@@ -129,13 +128,19 @@ export interface PowerProfile {
 
 export interface AppProps {
     windowId: string;
+    id?: string;
+    onClose?: () => void;
 }
 
 export interface Notification {
     id: string;
     title: string;
-    message: string;
+    // 'message' aliased as optional to stay compatible with systemBridge
+    // Notification which uses 'body' instead.
+    message?: string;
+    body?: string;
     appId?: string;
+    app?: string;
     timestamp: number;
     read: boolean;
     icon?: string;
@@ -193,3 +198,5 @@ export interface AICallRequest {
     model: string;
     messages: AIMessage[];
 }
+
+export type PowerAction = 'shutdown' | 'reboot' | 'suspend' | 'hibernate';
