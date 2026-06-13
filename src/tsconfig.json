@@ -16,7 +16,16 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "../../utils/*": ["./utils/*"],
+      "../../types": ["./types.ts"],
+      "../../contexts/*": ["./contexts/*"],
+      "../../../utils/*": ["./utils/*"],
+      "../../../types": ["./types.ts"],
+      "../../../contexts/*": ["./contexts/*"]
+    }
   },
   "include": [
     ".",
