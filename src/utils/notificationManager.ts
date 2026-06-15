@@ -1,66 +1,54 @@
-import { SystemBridge } from './systemBridge';
 import { Notification } from '../types';
 
+type Listener = (notifications: Notification[]) => void;
+
 class NotificationManager {
-    private listeners: ((notifications: Notification[]) => void)[] = [];
     private notifications: Notification[] = [];
+    private listeners: Set<Listener> = new Set();
 
-    constructor() {
-        this.loadHistory();
-        window.addEventListener('blue:notification', this.handleNotification as EventListener);
+    subscribe(listener: Listener): () => void {
+        this.listeners.add(listener);
+        listener([...this.notifications]);
+        return () => {
+            this.listeners.delete(listener);
+        };
     }
 
-    private handleNotification = (e: CustomEvent) => {
-        this.add(e.detail);
-    };
-
-    async loadHistory() {
-        const history = await SystemBridge.getNotificationHistory();
-        this.notifications = history;
-        this.notifyListeners();
+    private notify(): void {
+        const copy = [...this.notifications];
+        this.listeners.forEach(l => l(copy));
     }
 
-    add(notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) {
-        const newNotif: Notification = {
+    add(notification: Omit<Notification, 'id' | 'timestamp' | 'read'>): void {
+        const n: Notification = {
             ...notification,
-            id: Date.now().toString(),
+            id: Date.now().toString() + Math.random().toString(36).slice(2),
             timestamp: Date.now(),
             read: false,
         };
-        this.notifications.unshift(newNotif);
-        this.notifications = this.notifications.slice(0, 100);
-        SystemBridge.saveNotificationHistory(this.notifications);
-        this.notifyListeners();
-        this.showToast(newNotif);
+        this.notifications = [n, ...this.notifications];
+        this.notify();
     }
 
-    showToast(notification: Notification) {
-        window.dispatchEvent(new CustomEvent('blue:show-toast', { detail: notification }));
+    async markRead(id: string): Promise<void> {
+        this.notifications = this.notifications.map(n =>
+        n.id === id ? { ...n, read: true } : n
+        );
+        this.notify();
     }
 
-    markAsRead(id: string) {
-        const notif = this.notifications.find(n => n.id === id);
-        if (notif) notif.read = true;
-        SystemBridge.saveNotificationHistory(this.notifications);
-        this.notifyListeners();
+    async markAsRead(id: string): Promise<void> {
+        return this.markRead(id);
     }
 
-    clearAll() {
+    clearAll(): void {
         this.notifications = [];
-        SystemBridge.saveNotificationHistory(this.notifications);
-        this.notifyListeners();
+        this.notify();
     }
 
-    subscribe(listener: (notifications: Notification[]) => void) {
-        this.listeners.push(listener);
-        listener(this.notifications);
-        return () => {
-            this.listeners = this.listeners.filter(l => l !== listener);
-        };
-    }
-
-    private notifyListeners() {
-        this.listeners.forEach(l => l(this.notifications));
+    remove(id: string): void {
+        this.notifications = this.notifications.filter(n => n.id !== id);
+        this.notify();
     }
 }
 
