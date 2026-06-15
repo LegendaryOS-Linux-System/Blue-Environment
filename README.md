@@ -1,4 +1,4 @@
-# ![Blue Enviroment - Graphical environment for HackerOS.](https://github.com/LegendaryOS-Linux-System/Blue-Enviroment/blob/main/images/banner.png)
+# ![Blue Enviroment - Graphical environment for LegendaryOS.](https://github.com/LegendaryOS-Linux-System/Blue-Enviroment/blob/main/images/banner.png)
 # Blue Environment v0.6
 
 Production-grade Wayland desktop environment for HackerOS Linux. Using in LegendaryOS Blue.
