@@ -1,8 +1,0 @@
-name: blue
-version: 0.7
-description: Blue Environment launcher and package manager
-targets:
-  blue:
-    main: src/main.cr
-crystal: ">= 1.8.0"
-license: GPL-3.0
