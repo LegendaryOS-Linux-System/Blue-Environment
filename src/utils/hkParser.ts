@@ -48,12 +48,10 @@ export function parseHk(input: string): HkConfig {
 
         if (depth === 1) {
             if (rawVal === undefined) {
-                // Inline map declaration
                 currentL1Key = rawKey;
                 currentL2Key = null;
                 setNestedValue(config[currentSection], rawKey.split('.'), {});
             } else {
-                // L1 key-value, possibly dot-path
                 currentL1Key = null;
                 currentL2Key = null;
                 const keys = rawKey.includes('.') ? rawKey.split('.') : [rawKey];
@@ -83,26 +81,22 @@ export function parseHk(input: string): HkConfig {
 function parseValue(raw: string, line: number): HkValue {
     const s = raw.trim();
 
-    // Boolean
     if (s.toLowerCase() === 'true') return true;
     if (s.toLowerCase() === 'false') return false;
 
-    // Array [1, "two", true]
     if (s.startsWith('[') && s.endsWith(']')) {
         const inner = s.slice(1, -1).trim();
         if (!inner) return [];
         return splitArrayElements(inner).map(e => parseValue(e.trim(), line));
     }
 
-    // Number
     const num = Number(s);
     if (!isNaN(num) && s !== '') return num;
 
-    // Quoted string
     if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
         return s.slice(1, -1)
-            .replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-            .replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        .replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+        .replace(/\\r/g, '\r').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
     }
 
     return s;
@@ -155,13 +149,11 @@ export function resolveInterpolations(config: HkConfig, env?: Record<string, str
                 const varName = ref.slice(4);
                 return envVars[varName] || '';
             }
-            // section.key or section.key.subkey
             const parts = ref.split('.');
             const section = parts[0];
             let val: any = resolved[section];
             for (let i = 1; i < parts.length; i++) {
                 if (val == null) return '';
-                // Handle array indexing like list[0]
                 const arrMatch = parts[i].match(/^(.+)\[(\d+)\]$/);
                 if (arrMatch) {
                     val = val[arrMatch[1]];
@@ -172,20 +164,20 @@ export function resolveInterpolations(config: HkConfig, env?: Record<string, str
             }
             return val != null ? String(val) : '';
         });
-    }
+}
 
-    function resolveObj(obj: any): any {
-        if (typeof obj === 'string') return resolveStr(obj);
-        if (Array.isArray(obj)) return obj.map(resolveObj);
-        if (typeof obj === 'object' && obj !== null) {
-            const out: any = {};
-            for (const k in obj) out[k] = resolveObj(obj[k]);
-            return out;
-        }
-        return obj;
+function resolveObj(obj: any): any {
+    if (typeof obj === 'string') return resolveStr(obj);
+    if (Array.isArray(obj)) return obj.map(resolveObj);
+    if (typeof obj === 'object' && obj !== null) {
+        const out: any = {};
+        for (const k in obj) out[k] = resolveObj(obj[k]);
+        return out;
     }
+    return obj;
+}
 
-    return resolveObj(resolved);
+return resolveObj(resolved);
 }
 
 // ── Serializer ────────────────────────────────────────────────────────────
@@ -225,18 +217,18 @@ function serializeValue(v: HkValue): string {
 
 // ── Config file helpers for Blue Environment ──────────────────────────────
 
-const HK_CONFIG_PATH = () => {
-    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
-        return null; // Use Tauri fs API
-    }
-    return null;
-};
+// Typed wrapper for Tauri invoke to avoid TS2307 / TS2347
+async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    // Dynamic import avoids TS2307 — the module may not have @types at build time.
+    // We cast through unknown to satisfy strict mode without requiring the package types.
+    const tauri = await import('@tauri-apps/api/tauri' as any) as { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<T> };
+    return tauri.invoke(cmd, args);
+}
 
 export async function loadHkConfig(filename: string): Promise<HkConfig> {
     try {
         if ((window as any).__TAURI__) {
-            const { invoke } = await import('@tauri-apps/api/tauri');
-            const content = await invoke<string>('read_config_file', { filename });
+            const content = await tauriInvoke<string>('read_config_file', { filename });
             if (content) return resolveInterpolations(parseHk(content));
         }
     } catch {}
@@ -246,8 +238,7 @@ export async function loadHkConfig(filename: string): Promise<HkConfig> {
 export async function saveHkConfig(filename: string, config: HkConfig): Promise<void> {
     try {
         if ((window as any).__TAURI__) {
-            const { invoke } = await import('@tauri-apps/api/tauri');
-            await invoke('write_config_file', { filename, content: serializeHk(config) });
+            await tauriInvoke<void>('write_config_file', { filename, content: serializeHk(config) });
         }
     } catch {}
 }
