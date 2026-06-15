@@ -1,7 +1,0 @@
-// wget
-
-> sudo mkdir /usr/share/Blue-Environment/
-> sudo mkdir /usr/share/Blue-Environment/lib/
-> sudo wget -O /usr/share/Blue-Environment/blue-environment https://github.com/HackerOS-Linux-System/Blue-Environment/releases/download/v0.7/blue-environment
-> sudo wget -O /usr/share/Blue-Environment/lib/blue-compositor https://github.com/HackerOS-Linux-System/Blue-Environment/releases/download/v0.7/blue-compositor
-> sudo wget -O /usr/bin/blue https://github.com/HackerOS-Linux-System/Blue-Environment/releases/download/v0.7/blue
