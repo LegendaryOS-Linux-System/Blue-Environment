@@ -1,7 +1,7 @@
-# ![Blue Enviroment - Graphical environment for HackerOS.](https://github.com/HackerOS-Linux-System/Blue-Enviroment/blob/main/images/banner.png)
-# Blue Environment v0.4.0
+# ![Blue Enviroment - Graphical environment for HackerOS.](https://github.com/LegendaryOS-Linux-System/Blue-Enviroment/blob/main/images/banner.png)
+# Blue Environment v0.6
 
-Production-grade Wayland desktop environment for HackerOS Linux. Using in HackerOS Blue Edition
+Production-grade Wayland desktop environment for HackerOS Linux. Using in LegendaryOS Blue.
 
 ## Build Instructions
 
@@ -197,4 +197,4 @@ sudo usermod -aG seat $USER
 # Then re-login
 ```
 
-© 2026 HackerOS Team
+© 2026 LegendaryOS Team
