@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AppProps } from '../../types';
-import { useLanguage } from '../../contexts/LanguageContext';
-import { SystemBridge } from '../../utils/systemBridge';
+import { AppProps } from '../../../types';
+import { useLanguage } from '../../../contexts/LanguageContext';
+import { SystemBridge } from '../../../utils/systemBridge';
 import {
     Inbox, Send, FileText, Plus, Trash2, Star, StarOff,
     Reply, ReplyAll, Forward, Search, RefreshCw, Tag,
