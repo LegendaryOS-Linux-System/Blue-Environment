@@ -1,18 +1,73 @@
 use crate::cache::{self, CachedApp};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
 const GUI_CATEGORIES: &[&str] = &[
     "AudioVideo", "Audio", "Video", "Development", "Education",
-    "Game", "Graphics", "Network", "Office", "Science",
-    "Settings", "System", "Utility", "WebBrowser", "FileManager",
-    "TextEditor", "IDE", "Calendar", "ContactsManager",
-    "InstantMessaging", "VideoConference", "Calculator", "TerminalEmulator",
+"Game", "Graphics", "Network", "Office", "Science",
+"Settings", "System", "Utility", "WebBrowser", "FileManager",
+"TextEditor", "IDE", "Calendar", "ContactsManager",
+"InstantMessaging", "VideoConference", "Calculator", "TerminalEmulator",
 ];
 
 const EXEC_FLAGS_RE: &str = r"\s+%[fFuUdDnNickvm]";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AppInfo {
+    pub id: String,
+    pub name: String,
+    pub comment: String,
+    pub icon: String,
+    pub exec: String,
+    pub categories: Vec<String>,
+    pub desktop_file: String,
+    pub is_external: bool,
+}
+
+impl From<CachedApp> for AppInfo {
+    fn from(c: CachedApp) -> Self {
+        AppInfo {
+            id: c.id,
+            name: c.name,
+            comment: c.comment,
+            icon: c.icon,
+            exec: c.exec,
+            categories: c.categories,
+            desktop_file: c.desktop_file,
+            is_external: c.is_external,
+        }
+    }
+}
+
+pub async fn get_installed_apps() -> Result<Vec<AppInfo>, String> {
+    let apps = tokio::task::spawn_blocking(|| scan_desktop_apps(false))
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(apps.into_iter().map(AppInfo::from).collect())
+}
+
+pub async fn launch_app(app_id: &str) -> Result<bool, String> {
+    let app_id = app_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let apps = scan_desktop_apps(false);
+        if let Some(app) = apps.iter().find(|a| a.id == app_id) {
+            let exec = app.exec.clone();
+            std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&exec)
+            .spawn()
+            .map(|_| true)
+            .unwrap_or(false)
+        } else {
+            false
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
 
 fn is_gui_app(content: &str) -> bool {
     if content.lines().any(|l| l.trim() == "NoDisplay=true") {
@@ -23,8 +78,8 @@ fn is_gui_app(content: &str) -> bool {
     }
     let has_gui_category = GUI_CATEGORIES.iter().any(|cat| {
         content
-            .lines()
-            .any(|l| l.starts_with("Categories=") && l.contains(cat))
+        .lines()
+        .any(|l| l.starts_with("Categories=") && l.contains(cat))
     });
     let has_icon = content.lines().any(|l| l.starts_with("Icon="));
     has_gui_category || has_icon
@@ -68,8 +123,8 @@ pub fn scan_desktop_apps(force_refresh: bool) -> Vec<CachedApp> {
         PathBuf::from("/usr/share/applications"),
         PathBuf::from("/usr/local/share/applications"),
         dirs::home_dir()
-            .unwrap_or(PathBuf::from("/"))
-            .join(".local/share/applications"),
+        .unwrap_or(PathBuf::from("/"))
+        .join(".local/share/applications"),
     ];
 
     let mut apps: Vec<CachedApp> = Vec::new();
@@ -94,10 +149,10 @@ pub fn scan_desktop_apps(force_refresh: bool) -> Vec<CachedApp> {
 
             let get = |key: &str| -> String {
                 content
-                    .lines()
-                    .find(|l| l.starts_with(&format!("{}=", key)))
-                    .map(|l| l.splitn(2, '=').nth(1).unwrap_or("").trim().to_string())
-                    .unwrap_or_default()
+                .lines()
+                .find(|l| l.starts_with(&format!("{}=", key)))
+                .map(|l| l.splitn(2, '=').nth(1).unwrap_or("").trim().to_string())
+                .unwrap_or_default()
             };
 
             let name = get("Name");
@@ -117,25 +172,25 @@ pub fn scan_desktop_apps(force_refresh: bool) -> Vec<CachedApp> {
 
             let icon = find_icon_path(&get("Icon"));
             let categories: Vec<String> = get("Categories")
-                .split(';')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
 
             let id = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| name.clone());
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| name.clone());
 
             apps.push(CachedApp {
                 id,
                 name,
                 comment: get("Comment"),
-                icon,
-                exec,
-                categories,
-                desktop_file: path.to_string_lossy().to_string(),
-                is_external: false,
+                      icon,
+                      exec,
+                      categories,
+                      desktop_file: path.to_string_lossy().to_string(),
+                      is_external: false,
             });
         }
     }
