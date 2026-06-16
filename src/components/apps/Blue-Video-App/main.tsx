@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AppProps } from '../../types';
+import { AppProps } from '../../../types';
 import {
     Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
     Maximize2, Minimize2, FolderOpen, ListVideo, Shuffle,
