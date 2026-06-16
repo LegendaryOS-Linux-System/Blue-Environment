@@ -102,20 +102,47 @@ export interface ExternalWindow {
 let isTauri = false;
 let invoke: (cmd: string, args?: any) => Promise<any>;
 
-if (typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__) {
+// Tauri v2 always injects window.__TAURI_INTERNALS__ regardless of withGlobalTauri.
+// We detect it synchronously, but the actual @tauri-apps/api/core module must be
+// imported via ESM `import()` — `require()` does not exist in a Vite/browser bundle
+// and silently throws, which was breaking every single invoke() call.
+const hasTauriInternals = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+
+if (hasTauriInternals) {
     isTauri = true;
-    try {
-        // Tauri v2 core API
-        const core = require('@tauri-apps/api/core');
-        invoke = core.invoke;
-    } catch {
-        invoke = async (cmd: string, args?: any) => {
+}
+
+// Lazily-resolved real invoke, swapped in once the ESM import resolves.
+let realInvoke: ((cmd: string, args?: any) => Promise<any>) | null = null;
+let realInvokePromise: Promise<void> | null = null;
+
+function ensureRealInvoke(): Promise<void> {
+    if (!realInvokePromise) {
+        realInvokePromise = import('@tauri-apps/api/core')
+        .then((core) => {
+            realInvoke = core.invoke;
+        })
+        .catch((e) => {
+            console.error('Failed to load @tauri-apps/api/core:', e);
+        });
+    }
+    return realInvokePromise;
+}
+
+if (isTauri) {
+    // Kick off the import immediately so it's likely ready by the first call.
+    ensureRealInvoke();
+    invoke = async (cmd: string, args?: any) => {
+        if (!realInvoke) {
+            await ensureRealInvoke();
+        }
+        if (!realInvoke) {
             console.warn(`Tauri invoke not available, cmd: ${cmd}`, args);
             return null;
-        };
-    }
+        }
+        return realInvoke(cmd, args);
+    };
 } else {
-    isTauri = false;
     invoke = async (cmd: string, args?: any) => {
         console.log(`[Mock] invoke: ${cmd}`, args);
         return null;
@@ -137,7 +164,7 @@ let mockWifi = {
 
 let mockBt = [
     { name: 'Sony WH-1000XM4',      mac: '00:11:22:33:44', device_type: 'audio-headphones', connected: true,  paired: true, trusted: true, battery: 72   },
-    { name: 'Logitech MX Master 3', mac: 'AA:BB:CC:DD:EE', device_type: 'input-mouse',       connected: true,  paired: true, trusted: true, battery: null },
+{ name: 'Logitech MX Master 3', mac: 'AA:BB:CC:DD:EE', device_type: 'input-mouse',       connected: true,  paired: true, trusted: true, battery: null },
 ];
 
 let mockVolume     = 65;
@@ -611,7 +638,7 @@ export const SystemBridge = {
 
     // --- Google sign-in (mock) ---
     googleSignIn: async (): Promise<{ accessToken: string; user: any } | null> =>
-        new Promise(resolve => setTimeout(() => resolve({ accessToken: 'mock-token-123', user: { name: 'Jan Kowalski', email: 'jan@example.com', picture: '' } }), 1000)),
+    new Promise(resolve => setTimeout(() => resolve({ accessToken: 'mock-token-123', user: { name: 'Jan Kowalski', email: 'jan@example.com', picture: '' } }), 1000)),
 
     googleSignOut: async (): Promise<void> => { console.log('Signed out from Google'); },
 
@@ -664,11 +691,11 @@ export const SystemBridge = {
 // ============================================================================
 const MOCK_PACKAGES: PackageInfo[] = [
     { id: 'firefox',     name: 'Firefox',     description: 'Fast, private web browser',     version: '125.0',  source: 'apt',      installed: false },
-    { id: 'vlc',         name: 'VLC',         description: 'Versatile media player',         version: '3.0.20', source: 'apt',      installed: true, updateAvailable: true },
-    { id: 'gimp',        name: 'GIMP',        description: 'GNU Image Manipulation Program', version: '2.10.36',source: 'apt',      installed: false },
-    { id: 'libreoffice', name: 'LibreOffice', description: 'Open source office suite',       version: '7.6.0',  source: 'apt',      installed: true },
-    { id: 'code',        name: 'VS Code',     description: 'Code editor by Microsoft',       version: '1.89.0', source: 'flatpak',  installed: false },
-    { id: 'discord',     name: 'Discord',     description: 'Chat for communities',            version: '0.0.45', source: 'flatpak',  installed: false },
-    { id: 'spotify',     name: 'Spotify',     description: 'Music streaming',                 version: '1.2.35', source: 'snap',     installed: false },
-    { id: 'obsidian',    name: 'Obsidian',    description: 'Knowledge base & notes',          version: '1.4.16', source: 'appimage', installed: false },
+{ id: 'vlc',         name: 'VLC',         description: 'Versatile media player',         version: '3.0.20', source: 'apt',      installed: true, updateAvailable: true },
+{ id: 'gimp',        name: 'GIMP',        description: 'GNU Image Manipulation Program', version: '2.10.36',source: 'apt',      installed: false },
+{ id: 'libreoffice', name: 'LibreOffice', description: 'Open source office suite',       version: '7.6.0',  source: 'apt',      installed: true },
+{ id: 'code',        name: 'VS Code',     description: 'Code editor by Microsoft',       version: '1.89.0', source: 'flatpak',  installed: false },
+{ id: 'discord',     name: 'Discord',     description: 'Chat for communities',            version: '0.0.45', source: 'flatpak',  installed: false },
+{ id: 'spotify',     name: 'Spotify',     description: 'Music streaming',                 version: '1.2.35', source: 'snap',     installed: false },
+{ id: 'obsidian',    name: 'Obsidian',    description: 'Knowledge base & notes',          version: '1.4.16', source: 'appimage', installed: false },
 ];
