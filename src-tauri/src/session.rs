@@ -34,3 +34,30 @@ pub fn session_info() -> String {
         SessionType::Tty => "tty".to_string(),
     }
 }
+
+pub async fn lock() -> Result<(), String> {
+    match detect_session() {
+        SessionType::WaylandClient => {
+            // Try loginctl lock-session first, fallback to swaylock
+            let result = tokio::process::Command::new("loginctl")
+            .arg("lock-session")
+            .status()
+            .await;
+            if result.map(|s| s.success()).unwrap_or(false) {
+                return Ok(());
+            }
+            tokio::process::Command::new("swaylock")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        }
+        SessionType::X11Client => {
+            tokio::process::Command::new("xdg-screensaver")
+            .arg("lock")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        }
+        SessionType::Tty => Err("Cannot lock TTY session".to_string()),
+    }
+}
