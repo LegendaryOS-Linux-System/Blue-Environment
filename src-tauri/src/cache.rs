@@ -18,7 +18,7 @@ fn config_dir() -> PathBuf {
 fn apps_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or(PathBuf::from("/tmp"))
-        .join(".hackeros/Blue-Environment/apps")
+        .join(".legendaryos/Blue-Environment/apps")
 }
 
 pub fn ensure_dirs() {
@@ -210,7 +210,16 @@ pub fn list_external_apps() -> Vec<CachedApp> {
             .map(|n| app_dir.join(n))
             .find(|p| p.exists())
             .map(|p| format!("file://{}", p.to_string_lossy()))
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                // No bundled icon shipped with this external app — fall
+                // back to the system icon theme chain (Papirus etc.) by
+                // app name before giving up. Previously this case just
+                // produced an empty string unconditionally, so any
+                // externally-installed app without its own icon.png/svg
+                // rendered with no icon at all even when a matching
+                // system icon existed.
+                crate::icon_resolver::resolve_icon(&app_name)
+            });
 
         let display_name = app_name
             .replace(['-', '_'], " ")
@@ -226,12 +235,12 @@ pub fn list_external_apps() -> Vec<CachedApp> {
             .join(" ");
 
         apps.push(CachedApp {
-            id: format!("hackeros.{}", app_name),
+            id: format!("legendaryos.{}", app_name),
             name: display_name,
             comment: String::new(),
             icon,
             exec: binary.to_string_lossy().to_string(),
-            categories: vec!["HackerOS".to_string()],
+            categories: vec!["LegendaryOS".to_string()],
             desktop_file: String::new(),
             is_external: true,
         });
