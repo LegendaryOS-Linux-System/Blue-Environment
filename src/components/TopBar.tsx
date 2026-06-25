@@ -69,6 +69,8 @@ const TopBar: React.FC<TopBarProps> = ({
     const [weather, setWeather] = useState<WeatherData | null>(null);
     const [hasClipboardContent, setHasClipboardContent] = useState(false);
     const [pinnedApps, setPinnedApps] = useState<AppId[]>([AppId.TERMINAL, AppId.EXPLORER, AppId.SYSTEM_MONITOR, AppId.SETTINGS]);
+    const [panelOpacity, setPanelOpacity] = useState(0.95);
+    const [panelHeight, setPanelHeight] = useState(48);
 
     // Clock
     useEffect(() => {
@@ -97,13 +99,15 @@ const TopBar: React.FC<TopBarProps> = ({
         return () => clearInterval(id);
     }, []);
 
-    // Pinned apps from config (userConfig.pinnedApps if defined, else defaults)
+    // Pinned apps + panel appearance from config
     useEffect(() => {
         const unsub = configStore.subscribe(cfg => {
             const pinned = (cfg as any).pinnedApps as AppId[] | undefined;
             if (pinned && Array.isArray(pinned) && pinned.length > 0) {
                 setPinnedApps(pinned);
             }
+            if (typeof cfg.panelOpacity === 'number') setPanelOpacity(cfg.panelOpacity);
+            if (typeof cfg.panelSize === 'number' && cfg.panelSize > 0) setPanelHeight(cfg.panelSize);
         });
         return unsub;
     }, []);
@@ -114,8 +118,10 @@ const TopBar: React.FC<TopBarProps> = ({
     };
 
         return (
-            <div className="absolute top-0 left-0 right-0 h-12 bg-slate-900/95 backdrop-blur-sm border-b border-white/5
-            flex items-center justify-between px-3 z-50 select-none">
+            <div
+            className="absolute top-0 left-0 right-0 backdrop-blur-sm border-b border-white/5
+            flex items-center justify-between px-3 z-50 select-none"
+            style={{ height: panelHeight, backgroundColor: `rgba(15, 23, 42, ${panelOpacity})` }}>
 
             {/* Left: Start + search */}
             <div className="flex items-center gap-3 w-1/3">
