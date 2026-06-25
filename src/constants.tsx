@@ -1,4 +1,4 @@
-import { Terminal, Bot, FolderOpen, Settings, Info, Box, Globe, Calculator, Activity, Monitor, FileText, FileCode, Package, Mail, Camera } from 'lucide-react';
+import { Terminal, Bot, FolderOpen, Settings, Info, Box, Globe, Calculator, Activity, Monitor, FileText, FileCode, Package, Mail, Camera, Image, Video, Archive, ScanLine } from 'lucide-react';
 import { AppDefinition, AppId } from './types';
 
 import TerminalApp        from './components/apps/Terminal-App/main';
@@ -14,6 +14,10 @@ import NotepadApp         from './components/apps/NotepadApp';
 import BlueCodeApp        from './components/apps/Blue-Code-App/main';
 import BlueSoftwareApp    from './components/apps/Blue-Software-App/main';
 import MailApp            from './components/apps/Mail-App/main';
+import BlueImagesApp      from './components/apps/Blue-Images-App/main';
+import BlueVideoApp       from './components/apps/Blue-Video-App/main';
+import BlueScreenshotApp  from './components/apps/Blue-Screenshot/main';
+import BlueArchiveApp     from './components/apps/Blue-Archive-App/main';
 
 export const WALLPAPER_URL = "file:///usr/share/wallpapers/default.png";
 
@@ -85,19 +89,23 @@ export const APPS: Record<AppId, AppDefinition> = {
         isExternal: true, externalPath: 'blue-edit',
     },
     [AppId.BLUE_IMAGES]: {
-        id: AppId.BLUE_IMAGES, title: 'Blue Images', icon: Box,
-        isExternal: true, externalPath: 'blue-images',
+        id: AppId.BLUE_IMAGES, title: 'Blue Images', icon: Image,
+        component: BlueImagesApp, defaultWidth: 900, defaultHeight: 640,
     },
     [AppId.BLUE_VIDEOS]: {
-        id: AppId.BLUE_VIDEOS, title: 'Blue Videos', icon: Box,
-        isExternal: true, externalPath: 'blue-videos',
+        id: AppId.BLUE_VIDEOS, title: 'Blue Video', icon: Video,
+        component: BlueVideoApp, defaultWidth: 900, defaultHeight: 640,
     },
     [AppId.BLUE_MUSIC]: {
         id: AppId.BLUE_MUSIC, title: 'Blue Music', icon: Box,
         isExternal: true, externalPath: 'blue-music',
     },
     [AppId.BLUE_SCREEN]: {
-        id: AppId.BLUE_SCREEN, title: 'Blue Screen', icon: Monitor,
-        isExternal: true, externalPath: 'blue-screen',
+        id: AppId.BLUE_SCREEN, title: 'Blue Screenshot', icon: ScanLine,
+        component: BlueScreenshotApp, defaultWidth: 760, defaultHeight: 600,
+    },
+    [AppId.BLUE_ARCHIVE]: {
+        id: AppId.BLUE_ARCHIVE, title: 'Blue Archive', icon: Archive,
+        component: BlueArchiveApp, defaultWidth: 760, defaultHeight: 560,
     },
 };
