@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SystemBridge } from '../utils/systemBridge';
+import { useDialog } from '../contexts/DialogContext';
 import {
     GitBranch, GitCommit, GitMerge, RefreshCw, Check, X,
     Plus, Minus, ChevronRight, ChevronDown, Upload, Download,
@@ -22,6 +23,7 @@ interface GitCommitInfo {
 interface Props { cwd: string; }
 
 export function GitPanel({ cwd }: Props) {
+    const dialog = useDialog();
     const [branch, setBranch] = useState('');
     const [files, setFiles] = useState<GitFile[]>([]);
     const [commits, setCommits] = useState<GitCommitInfo[]>([]);
@@ -87,7 +89,13 @@ export function GitPanel({ cwd }: Props) {
         await run(`git reset HEAD "${path}"`); refresh();
     };
     const discardFile = async (path: string) => {
-        if (!window.confirm(`Discard changes to ${path}?`)) return;
+        const ok = await dialog.confirm({
+            title: 'Discard changes',
+            message: `Discard changes to ${path}? This cannot be undone.`,
+            confirmLabel: 'Discard',
+            danger: true,
+        });
+        if (!ok) return;
         await run(`git checkout -- "${path}"`); refresh();
     };
     const stageAll = async () => { await run('git add -A'); refresh(); };
