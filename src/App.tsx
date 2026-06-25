@@ -6,6 +6,7 @@ import { useWindowManager } from './hooks/useWindowManager';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { SystemBridge } from './utils/systemBridge';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+import { DialogProvider, useDialog } from './contexts/DialogContext';
 import Window from './components/Window';
 import TopBar from './components/TopBar';
 import StartMenu from './components/StartMenu';
@@ -39,7 +40,7 @@ function getExternalAppExec(appId: string): string {
     const app = APPS[appId as AppId];
     if (!app?.externalPath) return appId;
     const home = (window as any).__TAURI_HOME__ || '~';
-    return `${home}/.hackeros/Blue-Environment/apps/${app.externalPath}/${app.externalPath}`;
+    return `${home}/.legendaryos/Blue-Environment/apps/${app.externalPath}/${app.externalPath}`;
 }
 
 function getIconForFile(name: string, isDir: boolean, mimeType?: string): React.ComponentType<any> {
@@ -186,6 +187,7 @@ const LockScreen: React.FC<{ onUnlock: () => void }> = ({ onUnlock }) => {
 // ── Main app content ───────────────────────────────────────────────────────
 const AppContent: React.FC = () => {
     const { t } = useLanguage();
+    const dialog = useDialog();
     const [userConfig, setUserConfig] = useState<UserConfig | null>(null);
     const [sessionType, setSessionType] = useState<string>('unknown');
     const [wallpaperData, setWallpaperData] = useState<string>('');
@@ -202,6 +204,12 @@ const AppContent: React.FC = () => {
 
     // Subscribe to config changes (including wallpaper)
     useEffect(() => {
+        // Populate window.__TAURI_ENV_USERNAME__ / __TAURI_ENV_HOSTNAME__ /
+        // __TAURI_HOME__ once at startup so every component reading them
+        // synchronously (TopBar, Mail, About, ...) gets real values
+        // instead of the "user" / "localhost" / "~" placeholders.
+        SystemBridge.initEnvironment();
+
         configStore.init().then(cfg => {
             setUserConfig(cfg);
         });
@@ -459,20 +467,42 @@ const AppContent: React.FC = () => {
         }
     };
 
+    const handleDeleteDesktopItem = useCallback(async (item: DesktopItem) => {
+        const ok = await dialog.confirm({
+            title: 'Delete item',
+            message: `Delete "${item.name}"? This cannot be undone.`,
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!ok || !item.path) return;
+        await SystemBridge.deleteFile(item.path).catch(() => {});
+        if (userConfig?.desktopPath) loadDesktopItems(userConfig.desktopPath);
+    }, [dialog, userConfig, loadDesktopItems]);
+
     const createNewFolder = async () => {
-        const name = prompt(t('startmenu.new_folder') || 'New folder name:');
+        setContextMenu(c => ({ ...c, visible: false }));
+        const name = await dialog.prompt({
+            title: t('startmenu.new_folder') || 'New Folder',
+            placeholder: 'Untitled Folder',
+            defaultValue: 'New Folder',
+            confirmLabel: 'Create',
+        });
         if (!name || !userConfig?.desktopPath) return;
         await SystemBridge.createFolder(userConfig.desktopPath, name);
         loadDesktopItems(userConfig.desktopPath);
-        setContextMenu(c => ({ ...c, visible: false }));
     };
 
     const createNewTextFile = async () => {
-        const name = prompt(t('startmenu.new_text_file') || 'New file name (e.g. note.txt):');
+        setContextMenu(c => ({ ...c, visible: false }));
+        const name = await dialog.prompt({
+            title: t('startmenu.new_text_file') || 'New Text File',
+            placeholder: 'note.txt',
+            defaultValue: 'New Document.txt',
+            confirmLabel: 'Create',
+        });
         if (!name || !userConfig?.desktopPath) return;
         await SystemBridge.createTextFile(userConfig.desktopPath, name, '');
         loadDesktopItems(userConfig.desktopPath);
-        setContextMenu(c => ({ ...c, visible: false }));
     };
 
     const workspaceWindowCounts = Array.from({ length: wm.workspaceCount }, (_, i) =>
@@ -568,6 +598,42 @@ const AppContent: React.FC = () => {
             style={{ left: contextMenu.x, top: contextMenu.y }}
             onMouseDown={e => e.stopPropagation()}
             >
+            {/* File-specific actions when right-clicked on a desktop item */}
+            {contextMenu.targetId && (() => {
+                const item = desktopItems.find(i => i.id === contextMenu.targetId);
+                if (!item) return null;
+                return (<>
+                <button onClick={() => { handleDesktopItemDoubleClick(item); setContextMenu(c => ({ ...c, visible: false })); }}
+                className="px-3 py-2 hover:bg-white/10 text-sm text-left text-white font-medium transition-colors rounded-lg mx-1">
+                {t('filemenu.open')}
+                </button>
+                <div className="px-3 py-1 text-xs text-slate-500 font-medium">{t('filemenu.open_with')}</div>
+                {[
+                    { id: AppId.NOTEPAD,    label: 'Notepad',       ext: ['txt','md','json','log','toml','yaml','yml','sh','conf','csv'] },
+                    { id: AppId.BLUE_CODE,  label: 'Blue Code',     ext: ['ts','tsx','js','jsx','py','rb','rs','go','c','cpp','h','css','html','xml'] },
+                    { id: AppId.BLUE_IMAGES,label: 'Blue Images',   ext: ['png','jpg','jpeg','gif','webp','bmp','svg','avif'] },
+                    { id: AppId.BLUE_VIDEOS,label: 'Blue Video',    ext: ['mp4','webm','mkv','avi','mov','flv','wmv','ogv'] },
+                    { id: AppId.BLUE_ARCHIVE,label:'Blue Archive',  ext: ['zip','tar','gz','bz2','xz','7z','rar','zst'] },
+                ].filter(a => {
+                    const ext = (item.name.split('.').pop() || '').toLowerCase();
+                    return a.ext.includes(ext);
+                }).map(a => (
+                    <button key={a.id} onClick={() => {
+                        wm.openApp(a.id);
+                        setContextMenu(c => ({ ...c, visible: false }));
+                    }} className="px-5 py-1.5 hover:bg-white/10 text-xs text-left text-slate-300 hover:text-white transition-colors rounded-lg mx-1">
+                    {a.label}
+                    </button>
+                ))}
+                <div className="h-px bg-white/10 my-1 mx-2" />
+                <button onClick={() => { handleDeleteDesktopItem(item); setContextMenu(c => ({ ...c, visible: false })); }}
+                className="px-3 py-2 hover:bg-red-500/10 hover:text-red-400 text-sm text-left text-slate-300 transition-colors rounded-lg mx-1">
+                🗑 {t('filemenu.delete')}
+                </button>
+                </>);
+            })()}
+            {/* Empty-desktop actions */}
+            {!contextMenu.targetId && (<>
             <button onClick={() => { handleOpenSettings('personalization'); setContextMenu(c => ({ ...c, visible: false })); }}
             className="px-3 py-2 hover:bg-white/10 text-sm text-left text-slate-200 hover:text-white transition-colors rounded-lg mx-1">
             🎨 {t('settings.personalization')}
@@ -593,6 +659,7 @@ const AppContent: React.FC = () => {
             ⏻ Power Options
             </button>
             <div className="px-3 py-1 mt-1 text-[10px] text-slate-600">{t('startmenu.session')}: {sessionType}</div>
+            </>)}
             </div>
         )}
 
@@ -671,7 +738,9 @@ const AppContent: React.FC = () => {
 export default function App() {
     return (
         <LanguageProvider>
+        <DialogProvider>
         <AppContent />
+        </DialogProvider>
         </LanguageProvider>
     );
 }
