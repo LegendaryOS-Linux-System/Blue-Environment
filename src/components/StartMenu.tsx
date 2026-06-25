@@ -28,6 +28,8 @@ const INTERNAL_APP_CATEGORIES: Record<string, string[]> = {
     [AppId.NOTEPAD]: ['Office'], [AppId.BLUE_CODE]: ['Development'],
     [AppId.BLUE_IMAGES]: ['Graphics'], [AppId.BLUE_VIDEOS]: ['Multimedia'],
     [AppId.BLUE_MUSIC]: ['Multimedia'], [AppId.BLUE_SCREEN]: ['System'],
+    [AppId.BLUE_ARCHIVE]: ['Utility'], [AppId.MAIL]: ['Internet'],
+    [AppId.BLUE_SOFTWARE]: ['System'], [AppId.CAMERA]: ['Graphics'],
 };
 
 function getCategory(app: AnyApp): string {
