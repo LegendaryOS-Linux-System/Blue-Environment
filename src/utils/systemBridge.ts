@@ -62,9 +62,17 @@ export interface PackageInfo {
     name: string;
     description: string;
     version: string;
-    source: 'apt' | 'flatpak' | 'snap' | 'appimage';
+    source: 'dnf' | 'flatpak' | 'appimage';
     installed: boolean;
-    updateAvailable?: boolean;
+    // Matches the Rust struct field name as serialized over the wire
+    // (snake_case, like every other backend struct in this codebase —
+    // see FileEntry's is_dir/mime_type for the same convention). This
+    // was previously named `updateAvailable` here, which never matched
+    // anything the backend actually sent, so the Updates tab silently
+    // always showed zero updates regardless of what apt/flatpak reported.
+    update_available?: boolean;
+    icon?: string;
+    size?: string;
 }
 
 export interface AICallRequest {
@@ -100,7 +108,7 @@ export interface ExternalWindow {
 // ============================================================================
 
 let isTauri = false;
-let invoke: (cmd: string, args?: any) => Promise<any>;
+let invoke: <T = any>(cmd: string, args?: any) => Promise<T>;
 
 // Tauri v2 always injects window.__TAURI_INTERNALS__ regardless of withGlobalTauri.
 // We detect it synchronously, but the actual @tauri-apps/api/core module must be
@@ -143,9 +151,9 @@ if (isTauri) {
         return realInvoke(cmd, args);
     };
 } else {
-    invoke = async (cmd: string, args?: any) => {
+    invoke = async <T = any>(cmd: string, args?: any): Promise<T> => {
         console.log(`[Mock] invoke: ${cmd}`, args);
-        return null;
+        return null as T;
     };
 }
 
@@ -224,6 +232,39 @@ async function pluginDialogOpenDirectory(): Promise<string> {
     }
 }
 
+/**
+ * Opens a Tauri-native file picker that stays inside the shell window.
+ * `filters` follows Tauri's DialogFilter format:
+ *   [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+ *
+ * Returns an array of selected file paths (empty if user cancelled).
+ * Falls back to the backend `pick_file` command when the JS plugin isn't
+ * available.
+ */
+async function pluginDialogOpenFile(
+    filters: { name: string; extensions: string[] }[] = [],
+    multiple = false,
+    title = 'Wybierz plik',
+): Promise<string[]> {
+    try {
+        const mod = await import('@tauri-apps/plugin-dialog');
+        const selected = await mod.open({ filters, multiple, title });
+        if (!selected) return [];
+        if (Array.isArray(selected)) return selected as string[];
+        return [selected as string];
+    } catch {
+        // Plugin not available — use the backend pick_file command instead.
+        try {
+            const path: string | null = await invoke('pick_file', {
+                filters: filters.map(f => f.extensions).flat().join(','),
+            });
+            return path ? [path] : [];
+        } catch {
+            return [];
+        }
+    }
+}
+
 // ============================================================================
 // Main SystemBridge object
 // ============================================================================
@@ -231,6 +272,11 @@ async function pluginDialogOpenDirectory(): Promise<string> {
 export const SystemBridge = {
     // --- Environment ---
     isTauri: (): boolean => isTauri,
+
+    /** Low-level Tauri invoke — use only when a higher-level SystemBridge method doesn't exist. */
+    invoke: async <T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+        return invoke<T>(cmd, args);
+    },
 
     // --- Session ---
     getSessionType: async (): Promise<string> => {
@@ -240,6 +286,43 @@ export const SystemBridge = {
 
     getUsername: (): string => {
         try { return (window as any).__TAURI_ENV_USERNAME__ || 'user'; } catch { return 'user'; }
+    },
+
+    getHostname: async (): Promise<string> => {
+        // Cached on window after the first real lookup so repeated calls
+        // (many components call this) don't all hit the backend.
+        const cached = (window as any).__TAURI_ENV_HOSTNAME__;
+        if (cached) return cached;
+        if (isTauri) {
+            try {
+                const h = await invoke('get_hostname');
+                (window as any).__TAURI_ENV_HOSTNAME__ = h;
+                return h;
+            } catch {}
+        }
+        return 'localhost';
+    },
+
+    /**
+     * Populates window.__TAURI_ENV_USERNAME__ / __TAURI_ENV_HOSTNAME__ /
+     * __TAURI_HOME__ from the real backend. Call this once at shell
+     * startup (see App.tsx) — getUsername() above (and any other code
+     * reading these globals directly) stays synchronous and just reads
+     * whatever this populated, which is why this used to silently show
+     * "user" / "localhost" everywhere: nothing was ever calling it.
+     */
+    initEnvironment: async (): Promise<void> => {
+        if (!isTauri) return;
+        try {
+            const [username, hostname, home] = await Promise.all([
+                invoke('get_username').catch(() => 'user'),
+                invoke('get_hostname').catch(() => 'localhost'),
+                invoke('get_home_path').catch(() => null),
+            ]);
+            (window as any).__TAURI_ENV_USERNAME__ = username;
+            (window as any).__TAURI_ENV_HOSTNAME__ = hostname;
+            if (home) (window as any).__TAURI_HOME__ = home;
+        } catch {}
     },
 
     // --- Apps ---
@@ -318,6 +401,17 @@ export const SystemBridge = {
         }
     },
 
+    // --- File pickers (stay inside the shell — use Tauri plugin-dialog,
+    //     NOT <input type="file"> which opens an OS file-chooser outside
+    //     the Tauri window, showing "Wybór plików" on a white background) ---
+    pickFile: async (filters: { name: string; extensions: string[] }[] = [], title?: string): Promise<string | null> => {
+        const paths = await pluginDialogOpenFile(filters, false, title);
+        return paths[0] ?? null;
+    },
+    pickFiles: async (filters: { name: string; extensions: string[] }[] = [], title?: string): Promise<string[]> => {
+        return pluginDialogOpenFile(filters, true, title);
+    },
+
     pickDirectory: async (): Promise<string> => {
         if (isTauri) return pluginDialogOpenDirectory();
         return prompt('Wybierz katalog (mock):', '/home/user') || '/home/user';
@@ -349,12 +443,15 @@ export const SystemBridge = {
                 cpu: s.cpu, ram: s.ram, battery: s.battery, isCharging: s.is_charging,
                 volume: s.volume, brightness: s.brightness, wifiSSID: s.wifi_ssid,
                 kernel: s.kernel, sessionType: s.session_type,
+                netRx: s.net_rx_mb, netTx: s.net_tx_mb,
+                diskRead: s.disk_read_mb, diskWrite: s.disk_write_mb,
             };
         }
         return {
             cpu: 15, ram: 45, battery: 82, isCharging: false,
             volume: mockVolume, brightness: mockBrightness,
             wifiSSID: mockWifi.connectedSSID, kernel: 'WebKernel 1.0', sessionType: 'wayland:mock',
+            netRx: 0, netTx: 0, diskRead: 0, diskWrite: 0,
         };
     },
 
@@ -420,7 +517,36 @@ export const SystemBridge = {
     setBrightness: async (level: number) => { mockBrightness = level; if (isTauri) await invoke('set_brightness', { level }); },
 
     // --- Screenshot ---
-    takeScreenshot: async () => { if (isTauri) await invoke('take_screenshot'); else alert('[Mock] Screenshot taken'); },
+    takeScreenshot: async (): Promise<string | null> => {
+        if (isTauri) {
+            const path: string = await invoke('take_screenshot');
+            return path || null;
+        }
+        return null;
+    },
+
+    // --- Camera (native fallback for when getUserMedia is unavailable,
+    //     which is the case in Tauri's Linux webview — see CameraApp/mod.rs) ---
+    cameraListDevices: async (): Promise<{ path: string; name: string }[]> => {
+        if (isTauri) return await invoke('camera_list_devices') ?? [];
+        return [];
+    },
+    cameraCheckAvailable: async (): Promise<boolean> => {
+        if (isTauri) return await invoke('camera_check_available');
+        return false;
+    },
+    cameraCaptureFrame: async (device: string, width: number, height: number): Promise<string> => {
+        if (isTauri) return await invoke('camera_capture_frame', { device, width, height });
+        throw new Error('Not running under Tauri');
+    },
+    cameraCapturePhoto: async (device: string, width: number, height: number): Promise<string> => {
+        if (isTauri) return await invoke('camera_capture_photo', { device, width, height });
+        throw new Error('Not running under Tauri');
+    },
+    cameraRecordVideo: async (device: string, width: number, height: number, durationSecs: number): Promise<string> => {
+        if (isTauri) return await invoke('camera_record_video', { device, width, height, durationSecs });
+        throw new Error('Not running under Tauri');
+    },
 
     // --- Clipboard image ---
     writeClipboardImage: async (dataUrl: string): Promise<void> => {
@@ -636,6 +762,11 @@ export const SystemBridge = {
         return { success: false, error: 'Only in Tauri environment' };
     },
 
+    async stopLanguageServer(language: string, rootPath: string): Promise<boolean> {
+        if (isTauri) { try { return await invoke('stop_language_server', { language, rootPath }); } catch { return false; } }
+        return false;
+    },
+
     // --- Google sign-in (mock) ---
     googleSignIn: async (): Promise<{ accessToken: string; user: any } | null> =>
     new Promise(resolve => setTimeout(() => resolve({ accessToken: 'mock-token-123', user: { name: 'Jan Kowalski', email: 'jan@example.com', picture: '' } }), 1000)),
@@ -663,21 +794,17 @@ export const SystemBridge = {
         return `[Mock] ${request.service} response to: ${lastMsg}`;
     },
 
-    // --- Package manager ---
-    async getAptPackages():     Promise<PackageInfo[]> { if (isTauri) return await invoke('get_apt_packages')     ?? []; return MOCK_PACKAGES; },
+    // --- Package manager (dnf — LegendaryOS is Fedora-based, no apt; snap is not part of the supported stack) ---
+    async getDnfPackages():     Promise<PackageInfo[]> { if (isTauri) return await invoke('get_dnf_packages')     ?? []; return MOCK_PACKAGES; },
     async getFlatpakPackages(): Promise<PackageInfo[]> { if (isTauri) return await invoke('get_flatpak_packages') ?? []; return []; },
-    async getSnapPackages():    Promise<PackageInfo[]> { if (isTauri) return await invoke('get_snap_packages')    ?? []; return []; },
     async getAppImagePackages(): Promise<PackageInfo[]> { if (isTauri) return await invoke('get_appimage_packages') ?? []; return []; },
 
-    async installAptPackage(pkgId: string):    Promise<boolean> { if (isTauri) return await invoke('install_apt_package', { pkgId }); return true; },
-    async removeAptPackage(pkgId: string):     Promise<boolean> { if (isTauri) return await invoke('remove_apt_package',  { pkgId }); return true; },
-    async updateAptPackage(pkgId: string):     Promise<boolean> { if (isTauri) return await invoke('update_apt_package',  { pkgId }); return true; },
+    async installDnfPackage(pkgId: string):    Promise<boolean> { if (isTauri) return await invoke('install_dnf_package', { pkgId }); return true; },
+    async removeDnfPackage(pkgId: string):     Promise<boolean> { if (isTauri) return await invoke('remove_dnf_package',  { pkgId }); return true; },
+    async updateDnfPackage(pkgId: string):     Promise<boolean> { if (isTauri) return await invoke('update_dnf_package',  { pkgId }); return true; },
     async installFlatpakPackage(pkgId: string): Promise<boolean> { if (isTauri) return await invoke('install_flatpak_package', { pkgId }); return true; },
     async removeFlatpakPackage(pkgId: string):  Promise<boolean> { if (isTauri) return await invoke('remove_flatpak_package',  { pkgId }); return true; },
     async updateFlatpakPackage(pkgId: string):  Promise<boolean> { if (isTauri) return await invoke('update_flatpak_package',  { pkgId }); return true; },
-    async installSnapPackage(pkgId: string):   Promise<boolean> { if (isTauri) return await invoke('install_snap_package', { pkgId }); return true; },
-    async removeSnapPackage(pkgId: string):    Promise<boolean> { if (isTauri) return await invoke('remove_snap_package',  { pkgId }); return true; },
-    async updateSnapPackage(pkgId: string):    Promise<boolean> { if (isTauri) return await invoke('update_snap_package',  { pkgId }); return true; },
     async installAppImage(pkgId: string):  Promise<boolean> { if (isTauri) return await invoke('install_appimage', { pkgId }); return true; },
     async removeAppImage(pkgId: string):   Promise<boolean> { if (isTauri) return await invoke('remove_appimage',  { pkgId }); return true; },
     async updateAppImage(pkgId: string):   Promise<boolean> { if (isTauri) return await invoke('update_appimage',  { pkgId }); return true; },
@@ -690,12 +817,12 @@ export const SystemBridge = {
 // Inline mock package list (used when not in Tauri)
 // ============================================================================
 const MOCK_PACKAGES: PackageInfo[] = [
-    { id: 'firefox',     name: 'Firefox',     description: 'Fast, private web browser',     version: '125.0',  source: 'apt',      installed: false },
-{ id: 'vlc',         name: 'VLC',         description: 'Versatile media player',         version: '3.0.20', source: 'apt',      installed: true, updateAvailable: true },
-{ id: 'gimp',        name: 'GIMP',        description: 'GNU Image Manipulation Program', version: '2.10.36',source: 'apt',      installed: false },
-{ id: 'libreoffice', name: 'LibreOffice', description: 'Open source office suite',       version: '7.6.0',  source: 'apt',      installed: true },
+    { id: 'firefox',     name: 'Firefox',     description: 'Fast, private web browser',     version: '125.0',  source: 'dnf',      installed: false },
+{ id: 'vlc',         name: 'VLC',         description: 'Versatile media player',         version: '3.0.20', source: 'dnf',      installed: true, update_available: true },
+{ id: 'gimp',        name: 'GIMP',        description: 'GNU Image Manipulation Program', version: '2.10.36',source: 'dnf',      installed: false },
+{ id: 'libreoffice', name: 'LibreOffice', description: 'Open source office suite',       version: '7.6.0',  source: 'dnf',      installed: true },
 { id: 'code',        name: 'VS Code',     description: 'Code editor by Microsoft',       version: '1.89.0', source: 'flatpak',  installed: false },
 { id: 'discord',     name: 'Discord',     description: 'Chat for communities',            version: '0.0.45', source: 'flatpak',  installed: false },
-{ id: 'spotify',     name: 'Spotify',     description: 'Music streaming',                 version: '1.2.35', source: 'snap',     installed: false },
+{ id: 'spotify',     name: 'Spotify',     description: 'Music streaming',                 version: '1.2.35', source: 'flatpak',  installed: false },
 { id: 'obsidian',    name: 'Obsidian',    description: 'Knowledge base & notes',          version: '1.4.16', source: 'appimage', installed: false },
 ];
