@@ -16,11 +16,12 @@ interface HwInfo {
 }
 
 async function readDistroInfo(): Promise<DistroInfo> {
-    // Try HackerOS-style file first
+    // Try a kcm-about-distrorc style override file first (lets distro
+    // packagers brand the About page without touching app code).
     try {
         const raw = await SystemBridge.readFile('/etc/xdg/kcm-about-distrorc');
         if (raw?.trim()) {
-            const info: DistroInfo = { name: 'HackerOS', version: '1.0' };
+            const info: DistroInfo = { name: 'LegendaryOS', version: '0.6' };
             for (const line of raw.split('\n')) {
                 const eq = line.indexOf('='); if (eq < 0) continue;
                 const k = line.slice(0, eq).trim(), v = line.slice(eq + 1).trim();
@@ -52,7 +53,7 @@ async function readDistroInfo(): Promise<DistroInfo> {
         }
         return info;
     } catch {}
-    return { name: 'HackerOS Linux', version: '1.0', copyright: '© 2026 HackerOS Team' };
+    return { name: 'LegendaryOS Linux', version: '0.6', copyright: '© 2026 LegendaryOS Team' };
 }
 
 async function readHwInfo(): Promise<HwInfo> {
@@ -94,11 +95,14 @@ async function readHwInfo(): Promise<HwInfo> {
     const mins = Math.floor((up % 3600) / 60);
     const uptime = days > 0 ? `${days}d ${hrs}h ${mins}m` : hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
 
+    let hostname = 'localhost';
+    try { hostname = await SystemBridge.getHostname(); } catch {}
+
     return {
         kernel: stats.kernel || 'Unknown',
         cpu: Math.round(stats.cpu),
         ram: Math.round(stats.ram),
-        hostname: s.hostname || 'localhost',
+        hostname,
         username: SystemBridge.getUsername(),
         uptime,
         cpuModel,
@@ -136,7 +140,7 @@ const AboutApp: React.FC<AppProps> = () => {
                             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                     ) : (
                         <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-2xl shadow-blue-500/40 shrink-0">
-                            <span className="text-4xl font-black text-white">H</span>
+                            <span className="text-4xl font-black text-white">{(distro?.name || 'L').charAt(0).toUpperCase()}</span>
                         </div>
                     )}
                     <div>
@@ -184,11 +188,11 @@ const AboutApp: React.FC<AppProps> = () => {
                     </div>
                     <div className="flex-1">
                         <div className="font-semibold text-white">Blue Environment</div>
-                        <div className="text-sm text-slate-400">Version 0.5.0 — Smithay Wayland Compositor</div>
+                        <div className="text-sm text-slate-400">Version 0.6.0 - Smithay Wayland Compositor</div>
                     </div>
                     <div className="text-right">
                         <div className="text-xs text-slate-500">GNU GPL v3.0</div>
-                        <div className="text-xs text-slate-500 mt-0.5">© 2026 HackerOS Team</div>
+                        <div className="text-xs text-slate-500 mt-0.5">© 2026 LegendaryOS Team</div>
                     </div>
                 </div>
             </div>
