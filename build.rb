@@ -79,8 +79,8 @@ def cmd_help
   puts "#{COLOR_BOLD}Blue Environment v#{VERSION} — Build System#{COLOR_RESET}"
   print_hr
   puts "  #{COLOR_BOLD}ruby build.rb#{COLOR_RESET}                Show this list"
-  puts "  #{COLOR_BOLD}ruby build.rb desktop#{COLOR_RESET}        Build shell + compositor, package .rpm"
-  puts "                              (Fedora / LegendaryOS default)"
+  puts "  #{COLOR_BOLD}ruby build.rb desktop#{COLOR_RESET}        Build shell + compositor, package .rpm + .deb + Arch"
+  puts "                              (auto-detects rpmbuild / dpkg-deb / makepkg)"
   puts "  #{COLOR_BOLD}ruby build.rb shell#{COLOR_RESET}           npm install + npm run tauri build (fastest)"
   puts "  #{COLOR_BOLD}ruby build.rb shell debian#{COLOR_RESET}    Shell build — Blue Software uses APT backend"
   puts "  #{COLOR_BOLD}ruby build.rb shell arch#{COLOR_RESET}      Shell build — Blue Software uses Pacman backend"
@@ -93,6 +93,8 @@ def cmd_help
   puts "                              10-foot UI, gamepad navigation"
   puts "  #{COLOR_BOLD}ruby build.rb BEDM#{COLOR_RESET}            Build BEDM (Blue Environment Display Manager)"
   puts "  #{COLOR_BOLD}ruby build.rb compositor#{COLOR_RESET}      Build only the Wayland compositor"
+  puts "  #{COLOR_BOLD}ruby build.rb packages [fmt]#{COLOR_RESET}  Package already-built binaries only"
+  puts "                              fmt = rpm | deb | arch  (default: all available)"
   puts "  #{COLOR_BOLD}ruby build.rb app <name>#{COLOR_RESET}      Build one Blue app standalone (no full shell)"
   puts "  #{COLOR_BOLD}ruby build.rb app#{COLOR_RESET}             List all standalone-buildable apps"
   puts "  #{COLOR_BOLD}ruby build.rb all#{COLOR_RESET}             Build compositor + desktop shell (no .rpm)"
@@ -115,7 +117,7 @@ def build_frontend
     echo_error "npm install failed"
     return false
   end
-  echo_build "npm run build (tsc + vite)"
+  echo_build "npm run build (svelte-check + vite)"
   if run_cmd("npm run build")
     echo_success "frontend build complete"
     true
@@ -194,31 +196,160 @@ def build_rpm(spec_path, topdir, label)
 end
 
 # ============================================
+# .DEB — Debian / Ubuntu package (dpkg-deb, no full debhelper needed)
+# ============================================
+DEB_CONTROL_DIR = "packaging/blue-environment-debian"
+
+def stage_deb_tree(root)
+  FileUtils.rm_rf(root)
+  FileUtils.mkdir_p("#{root}/DEBIAN")
+  FileUtils.mkdir_p("#{root}/usr/share/Blue-Environment/lib/blue/src")
+  FileUtils.mkdir_p("#{root}/usr/share/wayland-sessions")
+  FileUtils.mkdir_p("#{root}/usr/share/applications")
+  FileUtils.mkdir_p("#{root}/usr/local/bin")
+
+  FileUtils.install(SHELL_BIN_PATH, "#{root}/usr/share/Blue-Environment/blue-environment", mode: 0755)
+  FileUtils.install(COMPOSITOR_BIN_PATH, "#{root}/usr/share/Blue-Environment/lib/blue-compositor", mode: 0755)
+  FileUtils.install("blue", "#{root}/usr/local/bin/blue", mode: 0755)
+  FileUtils.install("launcher/main.rb", "#{root}/usr/share/Blue-Environment/lib/blue/main.rb", mode: 0644)
+  FileUtils.cp_r("launcher/src/.", "#{root}/usr/share/Blue-Environment/lib/blue/src")
+
+  File.write("#{root}/usr/share/wayland-sessions/blue-environment.desktop",
+    "[Desktop Entry]\nName=Blue Environment\nExec=/usr/share/Blue-Environment/lib/blue-compositor\nType=Application\nDesktopNames=Blue\n")
+  File.write("#{root}/usr/share/applications/blue-environment.desktop",
+    "[Desktop Entry]\nName=Blue Environment\nExec=/usr/share/Blue-Environment/blue-environment\nIcon=/usr/share/Blue-Environment/icon.png\nType=Application\nCategories=System;\n")
+end
+
+def build_deb(label = "Debian/Ubuntu")
+  unless command_exists?("dpkg-deb")
+    echo_error "dpkg-deb not found — install the 'dpkg-dev' package to produce .deb files"
+    return false
+  end
+
+  root = "build/deb/blue-environment"
+  stage_deb_tree(root)
+
+  control_src = File.read("#{DEB_CONTROL_DIR}/control")
+  # dpkg-deb wants a single-stanza DEBIAN/control — take the binary
+  # "Package:" stanza (the second paragraph of the dpkg-source-style file
+  # we keep in packaging/ for reference) and inject the real version.
+  pkg_stanza = control_src.split(/\n\n/).last
+  File.write("#{root}/DEBIAN/control", "#{pkg_stanza}\nVersion: #{VERSION}\n")
+  FileUtils.install("#{DEB_CONTROL_DIR}/postinst", "#{root}/DEBIAN/postinst", mode: 0755) if File.exist?("#{DEB_CONTROL_DIR}/postinst")
+
+  out = "dist/blue-environment_#{VERSION}_amd64.deb"
+  FileUtils.mkdir_p("dist")
+  if run_cmd("dpkg-deb --root-owner-group --build #{root} #{out}")
+    echo_success "#{label} DEB → #{out}"
+    true
+  else
+    echo_error "#{label} DEB build failed"
+    false
+  end
+end
+
+# ============================================
+# .pkg.tar.zst — Arch Linux / LegendaryOS-Arch package (makepkg)
+# ============================================
+def build_arch_pkg(label = "Arch Linux")
+  unless command_exists?("makepkg")
+    echo_error "makepkg not found — this target only works on Arch-based systems"
+    return false
+  end
+
+  pkgdir = "build/arch"
+  FileUtils.mkdir_p(pkgdir)
+  FileUtils.cp(SHELL_BIN_PATH, "#{pkgdir}/blue-environment")
+  FileUtils.cp(COMPOSITOR_BIN_PATH, "#{pkgdir}/blue-compositor")
+  FileUtils.cp("blue", "#{pkgdir}/blue")
+  File.write("#{pkgdir}/blue-environment.desktop",
+    "[Desktop Entry]\nName=Blue Environment\nExec=/usr/share/Blue-Environment/blue-environment\nIcon=/usr/share/Blue-Environment/icon.png\nType=Application\nCategories=System;\n")
+  File.write("#{pkgdir}/blue-environment-session.desktop",
+    "[Desktop Entry]\nName=Blue Environment\nExec=/usr/share/Blue-Environment/lib/blue-compositor\nType=Application\nDesktopNames=Blue\n")
+  run_cmd("sed 's/@VERSION@/#{VERSION}/g' packaging/PKGBUILD > #{pkgdir}/PKGBUILD")
+
+  pwd = Dir.pwd
+  if run_cmd("cd #{pkgdir} && makepkg -f --skipinteg SRCDEST=#{pwd}/#{pkgdir}")
+    echo_success "#{label} package → #{pkgdir}/*.pkg.tar.zst"
+    true
+  else
+    echo_error "#{label} package build failed"
+    false
+  end
+end
+
+# ============================================
 # DESKTOP — shell + compositor, paczki .rpm (Fedora + LegendaryOS)
 # ============================================
 def cmd_build_desktop
-  echo_info "Building Blue Environment v#{VERSION} — Desktop (.rpm: Fedora + LegendaryOS)"
+  echo_info "Building Blue Environment v#{VERSION} — Desktop (all installable package formats)"
 
   exit 1 unless build_frontend
   exit 1 unless build_shell_binary
   exit 1 unless build_compositor_binary
   build_launcher_cli
 
-  unless command_exists?("rpmbuild")
-    echo_error "rpmbuild not found — install the 'rpm-build' package to produce .rpm files"
+  results = {}
+
+  if command_exists?("rpmbuild")
+    echo_build "packaging Fedora .rpm"
+    results["Fedora .rpm"] = build_rpm("packaging/blue-environment-fedora.spec", "rpmbuild/fedora", "Fedora")
+    echo_build "packaging LegendaryOS .rpm"
+    results["LegendaryOS .rpm"] = build_rpm("packaging/blue-environment-legendaryos.spec", "rpmbuild/legendaryos", "LegendaryOS")
+  else
+    echo_warn "rpmbuild not found — skipping .rpm (install the 'rpm-build' package to enable)"
+  end
+
+  if command_exists?("dpkg-deb")
+    echo_build "packaging .deb"
+    results["Debian .deb"] = build_deb
+  else
+    echo_warn "dpkg-deb not found — skipping .deb (install the 'dpkg-dev' package to enable)"
+  end
+
+  if command_exists?("makepkg")
+    echo_build "packaging Arch .pkg.tar.zst"
+    results["Arch package"] = build_arch_pkg
+  else
+    echo_warn "makepkg not found — skipping Arch package (only available on Arch-based systems)"
+  end
+
+  if results.empty?
+    echo_error "No packaging tool found (need at least one of: rpmbuild, dpkg-deb, makepkg)"
     exit 1
   end
 
-  echo_build "packaging Fedora .rpm"
-  fedora_ok = build_rpm("packaging/blue-environment-fedora.spec", "rpmbuild/fedora", "Fedora")
+  print_hr
+  results.each { |label, ok| ok ? echo_success(label) : echo_error(label) }
+  print_hr
 
-  echo_build "packaging LegendaryOS .rpm"
-  legendary_ok = build_rpm("packaging/blue-environment-legendaryos.spec", "rpmbuild/legendaryos", "LegendaryOS")
-
-  if fedora_ok && legendary_ok
-    puts "#{COLOR_GREEN}✓ Desktop build complete.#{COLOR_RESET}"
+  if results.values.all?
+    puts "#{COLOR_GREEN}✓ Desktop build complete — #{results.size} package format(s) produced.#{COLOR_RESET}"
   else
-    echo_warn "Desktop build finished with errors — see above"
+    echo_warn "Desktop build finished with errors on some formats — see above"
+    exit 1
+  end
+end
+
+# ============================================
+# PACKAGES — build only the installer packages (assumes binaries already built)
+# ============================================
+def cmd_build_packages(format = nil)
+  case format
+  when "rpm"
+    exit 1 unless command_exists?("rpmbuild")
+    build_rpm("packaging/blue-environment-fedora.spec", "rpmbuild/fedora", "Fedora") &&
+      build_rpm("packaging/blue-environment-legendaryos.spec", "rpmbuild/legendaryos", "LegendaryOS")
+  when "deb"
+    exit 1 unless command_exists?("dpkg-deb")
+    build_deb
+  when "arch", "pacman"
+    exit 1 unless command_exists?("makepkg")
+    build_arch_pkg
+  when nil, "all"
+    cmd_build_desktop
+  else
+    echo_error "Unknown package format '#{format}'. Use: rpm, deb, arch"
     exit 1
   end
 end
@@ -233,7 +364,7 @@ def cmd_build_tv
   echo_build "UI mode: VITE_BLUE_UI_MODE=bigpicture, VITE_BLUE_ALTERNATIVE=tv"
 
   unless File.exist?('src/alternatives/tv/main.tsx')
-    echo_error "TV shell not found at src/alternatives/tv/main.tsx"
+    echo_error "TV shell not found — src/alternatives/tv/ was removed with the React source and has not been rebuilt in Svelte yet (see STATUS.md)"
     exit 1
   end
 
@@ -320,7 +451,7 @@ def cmd_build_android
   end
 
   unless File.exist?('src/alternatives/android/main.tsx')
-    echo_error "Android shell not found at src/alternatives/android/main.tsx"
+    echo_error "Android shell not found — src/alternatives/android/ was removed with the React source and has not been rebuilt in Svelte yet (see STATUS.md)"
     exit 1
   end
 
@@ -638,6 +769,10 @@ when "BEDM", "bedm"
   cmd_build_bedm
 when "compositor"
   cmd_build_compositor
+when "packages", "pkg"
+  # ruby build.rb packages [rpm|deb|arch]   (binaries must already be built —
+  # e.g. after `ruby build.rb shell` — this only (re)packages them)
+  cmd_build_packages(ARGV[1])
 when "app"
   # ruby build.rb app <app_name>
   # ruby build.rb app             (lists all available apps)
