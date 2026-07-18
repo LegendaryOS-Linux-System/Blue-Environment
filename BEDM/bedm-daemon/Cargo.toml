@@ -3,7 +3,7 @@ name = "bedm-daemon"
 version = "1.0.0"
 edition = "2021"
 description = "BEDM — Blue Environment Display Manager daemon"
-authors = ["HackerOS Team <hackeros068@gmail.com>"]
+authors = ["LegendaryOS Team"]
 
 [[bin]]
 name = "bedm"
@@ -18,8 +18,9 @@ serde_json         = "1"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender   = "0.2"
-hk-parser          = "0.3.0"
+toml               = "0.8"
 dirs               = "5.0"
 glob               = "0.3"
 chrono             = { version = "0.4", features = ["serde"] }
 uuid               = { version = "1", features = ["v4"] }
+sha2               = "0.10"
