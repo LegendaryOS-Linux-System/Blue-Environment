@@ -11,12 +11,15 @@ use tracing::{error, info, warn};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum GreeterRequest {
-    Authenticate { username: String, password: String },
-    StartSession  { username: String, session: String, env: Option<Vec<(String, String)>> },
+    Authenticate      { username: String, password: String },
+    PatternAuth       { username: String, pattern: Vec<u8> },
+    StartSession      { username: String, session: String, env: Option<Vec<(String, String)>> },
+    GuestLogin        { session: String },
+    FingerprintAuth   { username: String },
     GetSessions,
     GetUsers,
     GetInfo,
-    PowerAction   { action: String },
+    PowerAction       { action: String },
     Cancel,
 }
 
@@ -164,6 +167,77 @@ async fn handle_client(mut stream: UnixStream, state: Arc<Mutex<DaemonState>>) {
                 let sid = session::launch_session(&state, &username, &session, env).await;
                 send_response(&mut writer, &DaemonResponse::SessionStarted {
                     session_id: sid.unwrap_or_else(|| "error".to_string()) }).await;
+            }
+            GreeterRequest::GuestLogin { session } => {
+                let allow_guest = state.lock().await.config.allow_guest.unwrap_or(false);
+                if !allow_guest {
+                    send_response(&mut writer, &DaemonResponse::Error {
+                        message: "Guest login is disabled in bedm.toml (allow_guest = false)".to_string()
+                    }).await;
+                    continue;
+                }
+                info!("Guest login requested for session '{}'", session);
+                // Create a temporary guest account if it doesn't exist
+                crate::users::ensure_guest_account().await;
+                let sid = session::launch_session(&state, "guest", &session, None).await;
+                auth_user = Some("guest".to_string());
+                send_response(&mut writer, &DaemonResponse::SessionStarted {
+                    session_id: sid.unwrap_or_else(|| "error".to_string()) }).await;
+            }
+            GreeterRequest::PatternAuth { username, pattern } => {
+                if fail_count >= 5 {
+                    send_response(&mut writer, &DaemonResponse::AuthFailure {
+                        reason: "Too many failed attempts".to_string(),
+                        attempts_left: 0 }).await;
+                    break;
+                }
+                let home = crate::users::list_users(&state).await
+                    .into_iter().find(|u| u.username == username).map(|u| u.home);
+                let result = match home {
+                    Some(home) => crate::pam_auth::authenticate_pattern(&username, &home, &pattern),
+                    None => Err(format!("User '{}' not found", username)),
+                };
+                match result {
+                    Ok(()) => {
+                        info!("Pattern auth success: {}", username);
+                        auth_user = Some(username.clone());
+                        fail_count = 0;
+                        send_response(&mut writer, &DaemonResponse::AuthSuccess { username }).await;
+                    }
+                    Err(reason) => {
+                        warn!("Pattern auth failure for {}: {}", username, reason);
+                        fail_count += 1;
+                        send_response(&mut writer, &DaemonResponse::AuthFailure {
+                            reason, attempts_left: 5u8.saturating_sub(fail_count) }).await;
+                    }
+                }
+            }
+            GreeterRequest::FingerprintAuth { username } => {
+                info!("Fingerprint auth requested for {}", username);
+                // fprintd-verify checks the enrolled print for the *given*
+                // Linux user (it's already scoped server-side by fprintd —
+                // see `fprintd-enroll <user>`), so we pass -u explicitly
+                // rather than trusting "whichever user last enrolled".
+                let user_for_scan = username.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("fprintd-verify")
+                        .arg("-u").arg(&user_for_scan)
+                        .arg("-f").arg("any")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                }).await.unwrap_or(false);
+
+                if result {
+                    info!("Fingerprint auth success: {}", username);
+                    auth_user = Some(username.clone());
+                    send_response(&mut writer, &DaemonResponse::AuthSuccess { username }).await;
+                } else {
+                    send_response(&mut writer, &DaemonResponse::AuthFailure {
+                        reason: "Fingerprint not recognised, sensor unavailable, or fprintd not enrolled for this user".to_string(),
+                        attempts_left: 5,
+                    }).await;
+                }
             }
             GreeterRequest::PowerAction { action } => {
                 let cmd = {
