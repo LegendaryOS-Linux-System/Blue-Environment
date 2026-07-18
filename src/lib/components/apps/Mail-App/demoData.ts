@@ -1,0 +1,40 @@
+import type { Email } from './types';
+
+export const DEMO_EMAILS: Email[] = [
+  {
+    id: '1',
+    from: { name: 'Blue Environment', email: 'noreply@blue.env' },
+    to: [{ name: 'You', email: 'user@blue.env' }],
+    subject: 'Welcome to Blue Mail!',
+    body: 'Welcome to Blue Mail — a production-ready email client built into Blue Environment.\n\nFeatures:\n• Rich email viewer\n• Compose with CC/BCC\n• Star important emails\n• Archive & labels\n• Search across folders\n\nEnjoy!',
+    date: new Date(),
+    read: false,
+    starred: true,
+    labels: ['important'],
+    folder: 'inbox',
+  },
+  {
+    id: '2',
+    from: { name: 'LegendaryOS Team', email: 'team@legendaryos.dev' },
+    to: [{ name: 'You', email: 'user@blue.env' }],
+    subject: 'Blue Environment v0.6.0 Release Notes',
+    body: 'Blue Environment v0.6.0 is here — now with a fully Svelte-based desktop shell!\n\nNew features:\n• Production Wayland compositor (Smithay)\n• XWayland for X11 app support\n• DRM/KMS backend for bare-metal use\n• VirtualBox / VM nested rendering\n• Alt+Tab window switcher\n• 4 workspaces\n• Full keyboard shortcuts\n• External window tracking\n• Native ext-session-lock-v1 screen lock\n\nEnjoy the new release!',
+    date: new Date(Date.now() - 3600000),
+    read: true,
+    starred: false,
+    labels: ['update'],
+    folder: 'inbox',
+  },
+  {
+    id: '3',
+    from: { name: 'System Monitor', email: 'monitor@blue.env' },
+    to: [{ name: 'You', email: 'user@blue.env' }],
+    subject: 'System Report: All services running',
+    body: 'Daily system report:\n\nCPU: Normal load\nMemory: 45% used\nDisk: 60% used\nNetwork: Connected (BlueNet 5G)\n\nAll services running normally.',
+    date: new Date(Date.now() - 86400000),
+    read: true,
+    starred: false,
+    labels: [],
+    folder: 'inbox',
+  },
+];
