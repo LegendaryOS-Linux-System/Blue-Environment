@@ -103,13 +103,48 @@ pub fn scan_desktop_apps(force_refresh: bool) -> Vec<CachedApp> {
     }
 
     let flag_re = Regex::new(EXEC_FLAGS_RE).unwrap();
-    let search_dirs = [
+    let home = dirs::home_dir().unwrap_or(PathBuf::from("/"));
+
+    // Was previously just 3 hardcoded paths, which silently missed a lot of
+    // real installs:
+    //  - Flatpak apps (very common — GNOME Software / Discover both default
+    //    to it) export their .desktop files under a completely different
+    //    tree that isn't covered by XDG_DATA_DIRS by default.
+    //  - Snap apps similarly export to their own directory.
+    //  - XDG_DATA_DIRS itself wasn't consulted at all, so any distro or
+    //    environment that adds its own entries there (e.g. a Nix profile,
+    //    a custom /opt install, a user-session systemd override) was
+    //    invisible to the Start Menu no matter what the user installed.
+    let mut search_dirs: Vec<PathBuf> = vec![
         PathBuf::from("/usr/share/applications"),
         PathBuf::from("/usr/local/share/applications"),
-        dirs::home_dir()
-        .unwrap_or(PathBuf::from("/"))
-        .join(".local/share/applications"),
+        home.join(".local/share/applications"),
+        // Flatpak (system-wide and per-user)
+        PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+        home.join(".local/share/flatpak/exports/share/applications"),
+        // Snap
+        PathBuf::from("/var/lib/snapd/desktop/applications"),
     ];
+
+    // XDG_DATA_DIRS is colon-separated; each entry gets an implicit
+    // "/applications" suffix per the XDG Base Directory / Desktop Entry
+    // specs. Falls back to the spec's documented default if unset.
+    let xdg_data_dirs = std::env::var("XDG_DATA_DIRS")
+        .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+    for dir in xdg_data_dirs.split(':').filter(|s| !s.is_empty()) {
+        search_dirs.push(PathBuf::from(dir).join("applications"));
+    }
+    // XDG_DATA_HOME (defaults to ~/.local/share) — covers the same ground
+    // as the hardcoded entry above but also respects an explicit override.
+    if let Ok(xdg_data_home) = std::env::var("XDG_DATA_HOME") {
+        search_dirs.push(PathBuf::from(xdg_data_home).join("applications"));
+    }
+
+    // Dedup by canonical path so overlapping entries (very likely, e.g.
+    // XDG_DATA_DIRS usually already includes /usr/share) don't cause the
+    // same .desktop files to be walked and considered twice.
+    let mut seen_dirs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    search_dirs.retain(|d| seen_dirs.insert(d.canonicalize().unwrap_or_else(|_| d.clone())));
 
     let mut apps: Vec<CachedApp> = Vec::new();
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
