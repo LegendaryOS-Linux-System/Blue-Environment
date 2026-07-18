@@ -42,6 +42,9 @@ use smithay::{
         socket::ListeningSocketSource,
         viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
+        shell::xdg::decoration::XdgDecorationState,
+        cursor_shape::CursorShapeManagerState,
+        session_lock::{SessionLockManagerState, SessionLocker, LockSurface},
     },
     input::dnd::DndGrabHandler,
     xwayland::{XWayland, xwm::X11Wm},
@@ -155,6 +158,14 @@ pub struct BlueState {
     pub presentation_state: PresentationState,
     pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub viewporter_state: ViewporterState,
+    pub xdg_decoration_state: XdgDecorationState,
+    pub cursor_shape_manager_state: CursorShapeManagerState,
+    pub session_lock_state: SessionLockManagerState,
+
+    // Session lock (ext-session-lock-v1) runtime state
+    pub is_locked: bool,
+    pub pending_lock: Option<SessionLocker>,
+    pub lock_surfaces: HashMap<String, LockSurface>,
 
     pub seat: Seat<Self>,
     pub pointer_location: Point<f64, Logical>,
@@ -223,6 +234,12 @@ impl BlueState {
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<Self>(&display_handle);
         let viewporter_state = ViewporterState::new::<Self>(&display_handle);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(&display_handle);
+        let cursor_shape_manager_state = CursorShapeManagerState::new::<Self>(&display_handle);
+        // Accept every client that requests a lock — access control for who
+        // is *allowed* to lock the session (vs. merely requesting it) is
+        // handled at the app level (only Blue-Lock ships this capability).
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&display_handle, |_client| true);
 
         // Create Wayland socket
         let socket = ListeningSocketSource::new_auto()
@@ -264,6 +281,12 @@ impl BlueState {
             presentation_state,
             fractional_scale_manager_state,
             viewporter_state,
+            xdg_decoration_state,
+            cursor_shape_manager_state,
+            session_lock_state,
+            is_locked: false,
+            pending_lock: None,
+            lock_surfaces: HashMap::new(),
             seat,
             pointer_location: Point::from((0.0, 0.0)),
             cursor_status: Arc::new(Mutex::new(CursorImageStatus::default_named())),
