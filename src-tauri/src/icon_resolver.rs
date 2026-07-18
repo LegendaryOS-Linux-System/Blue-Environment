@@ -1,17 +1,67 @@
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
+use std::sync::RwLock;
+
+/// User-chosen icon theme override (Settings → Personalization → Icon
+/// Theme). `None` means "use the auto-detected system theme + Papirus
+/// fallback chain below", same as before this was made configurable.
+static USER_ICON_THEME: Lazy<RwLock<Option<String>>> = Lazy::new(|| RwLock::new(None));
+
+pub fn set_icon_theme(theme: Option<String>) {
+    if let Ok(mut guard) = USER_ICON_THEME.write() {
+        *guard = theme;
+    }
+}
+
+pub fn get_icon_theme() -> Option<String> {
+    USER_ICON_THEME.read().ok().and_then(|g| g.clone())
+}
+
+/// Lists installed icon themes by scanning for `index.theme` files —
+/// used by the Settings "Icon Theme" picker so it only ever offers themes
+/// that are actually present, rather than a hardcoded guess list.
+pub fn list_installed_icon_themes() -> Vec<String> {
+    let mut themes = Vec::new();
+    let search_roots = [
+        PathBuf::from("/usr/share/icons"),
+        dirs::home_dir().unwrap_or_default().join(".local/share/icons"),
+        dirs::home_dir().unwrap_or_default().join(".icons"),
+    ];
+    for root in &search_roots {
+        let Ok(entries) = std::fs::read_dir(root) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("index.theme").exists() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if !themes.iter().any(|t: &String| t == name) {
+                        themes.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    themes.sort();
+    themes
+}
 
 /// Icon themes tried, in priority order, before falling back to
 /// linicon's own automatic fallback chain (which ultimately ends at
 /// "hicolor", the spec-mandated default).
-static PREFERRED_THEMES: Lazy<Vec<String>> = Lazy::new(|| {
+fn preferred_themes() -> Vec<String> {
     let mut themes = Vec::new();
+
+    // Explicit user override (Settings) takes priority over everything.
+    if let Some(t) = get_icon_theme() {
+        themes.push(t);
+    }
 
     // Respect the user's actual configured icon theme first, if linicon
     // can determine one (it checks kdeglobals, gsettings, gtk-3.0
     // settings.ini, .gtkrc-2.0, and theme.conf, in that order).
     if let Some(t) = linicon::get_system_theme() {
-        themes.push(t);
+        if !themes.iter().any(|x| x == &t) {
+            themes.push(t);
+        }
     }
 
     // Papirus is the practical default for Blue Environment. It ships
@@ -26,7 +76,7 @@ static PREFERRED_THEMES: Lazy<Vec<String>> = Lazy::new(|| {
     }
 
     themes
-});
+}
 
 /// Sizes tried per theme, largest-reasonable first — Blue's app grid and
 /// taskbar both render around 40-64px, so we ask for that first rather
@@ -67,7 +117,7 @@ pub fn resolve_icon(icon_name: &str) -> String {
 }
 
 fn lookup_via_linicon(icon_name: &str) -> Option<PathBuf> {
-    for theme in PREFERRED_THEMES.iter() {
+    for theme in preferred_themes().iter() {
         for &size in PREFERRED_SIZES {
             if let Some(Ok(icon)) = linicon::lookup_icon(icon_name)
                 .from_theme(theme)
