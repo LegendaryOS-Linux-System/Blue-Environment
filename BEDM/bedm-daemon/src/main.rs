@@ -9,10 +9,10 @@ use std::{fs, os::unix::fs::PermissionsExt, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-pub const BEDM_VERSION: &str = "1.0.0";
+pub const BEDM_VERSION: &str = "0.6.0";
 pub const SOCKET_PATH:  &str = "/run/bedm/bedm.sock";
-pub const CONFIG_PATH:  &str = "/etc/bedm/bedm.hk";
-pub const LOG_DIR:      &str = "/var/log/bedm";
+pub const CONFIG_PATH:  &str = "/etc/bedm/bedm.toml";
+pub const LOG_DIR:      &str = "/tmp/bedm-logs";
 pub const RUN_DIR:      &str = "/run/bedm";
 
 #[derive(Debug, Clone)]
@@ -65,6 +65,16 @@ async fn main() {
             }
             session::launch_session(&state_clone, &user, &session_type, None).await;
         });
+    } else if let Some(live_user) = users::find_live_user(&state).await {
+        // Blue Installer live mode — see users::find_live_user() for the
+        // `.live` marker file contract. No delay: a live/installer session
+        // should reach the desktop (and then the installer) as fast as
+        // possible, there's no "wrong user logged in" risk to wait out.
+        info!("Live-mode autologin: {} -> blue-environment", live_user);
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            session::launch_session(&state_clone, &live_user, "blue-environment", None).await;
+        });
     } else {
         let state_clone = state.clone();
         tokio::spawn(async move {
@@ -76,14 +86,32 @@ async fn main() {
 }
 
 fn init_logging() {
-    let _ = fs::create_dir_all(LOG_DIR);
-    let file_appender = tracing_appender::rolling::daily(LOG_DIR, "bedm.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_writer(non_blocking)
-        .with_ansi(false)
-        .with_max_level(tracing::Level::INFO)
-        .init();
+    // Try XDG_RUNTIME_DIR first (user-writable, no root needed),
+    // then /tmp/bedm-logs, finally stderr-only fallback.
+    let log_dir = std::env::var("XDG_RUNTIME_DIR")
+        .map(|d| format!("{}/bedm/logs", d))
+        .unwrap_or_else(|_| LOG_DIR.to_string());
+
+    let dir_ok = fs::create_dir_all(&log_dir).is_ok();
+    if dir_ok {
+        let file_appender = tracing_appender::rolling::daily(&log_dir, "bedm.log");
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        // Intentionally leak guard so logging continues for the process lifetime.
+        std::mem::forget(guard);
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .init();
+    } else {
+        // Fall back to stderr — avoids panic on systems where /var/log/bedm
+        // is not writable (e.g. running as a non-root developer).
+        tracing_subscriber::fmt()
+            .with_ansi(true)
+            .with_max_level(tracing::Level::INFO)
+            .init();
+        tracing::warn!("Could not create log directory '{}', logging to stderr", log_dir);
+    }
 }
 
 fn setup_runtime_dirs() {
@@ -104,41 +132,47 @@ fn setup_signals() {
 }
 
 async fn launch_greeter(state: &Arc<Mutex<DaemonState>>) {
-    let (greeter_path, vt_num) = {
-        let st = state.lock().await;
-        (
-            st.config.greeter_path.clone()
-                .unwrap_or_else(|| "/usr/bin/bedm-greeter".to_string()),
-            st.config.vt.unwrap_or(1),
-        )
-    };
+    // Restarts the greeter forever whenever it exits. This used to be a
+    // directly-recursive `async fn`, which the Rust compiler rejects
+    // (E0733: recursion in an async fn requires boxing) even when the
+    // recursive call itself is wrapped in Box::pin — the fix is to use a
+    // loop instead of self-recursion.
+    loop {
+        let (greeter_path, vt_num) = {
+            let st = state.lock().await;
+            (
+                st.config.greeter_path.clone()
+                    .unwrap_or_else(|| "/usr/bin/bedm-greeter".to_string()),
+                st.config.vt.unwrap_or(1),
+            )
+        };
 
-    info!("Launching greeter: {}", greeter_path);
+        info!("Launching greeter: {}", greeter_path);
 
-    if let Err(e) = vt::switch_to(vt_num) {
-        warn!("VT switch to {} failed: {} — continuing", vt_num, e);
-    }
-
-    match tokio::process::Command::new(&greeter_path)
-        .env("BEDM_SOCKET", SOCKET_PATH)
-        .env("BEDM_CONFIG", CONFIG_PATH)
-        .env("XDG_SESSION_TYPE", "wayland")
-        .spawn()
-    {
-        Ok(mut child) => {
-            let pid = child.id().unwrap_or(0);
-            info!("Greeter PID: {}", pid);
-            state.lock().await.greeter_pid = Some(pid);
-            let _ = child.wait().await;
-            info!("Greeter exited — relaunching");
-            state.lock().await.greeter_pid = None;
-            // Relaunch greeter after session ends
-            let state_clone = state.clone();
-            Box::pin(launch_greeter(&state_clone)).await;
+        if let Err(e) = vt::switch_to(vt_num) {
+            warn!("VT switch to {} failed: {} — continuing", vt_num, e);
         }
-        Err(e) => {
-            error!("Failed to launch greeter '{}': {}", greeter_path, e);
-            error!("Is bedm-greeter installed at {}?", greeter_path);
+
+        match tokio::process::Command::new(&greeter_path)
+            .env("BEDM_SOCKET", SOCKET_PATH)
+            .env("BEDM_CONFIG", CONFIG_PATH)
+            .env("XDG_SESSION_TYPE", "wayland")
+            .spawn()
+        {
+            Ok(mut child) => {
+                let pid = child.id().unwrap_or(0);
+                info!("Greeter PID: {}", pid);
+                state.lock().await.greeter_pid = Some(pid);
+                let _ = child.wait().await;
+                info!("Greeter exited — relaunching");
+                state.lock().await.greeter_pid = None;
+                // Loop around and relaunch the greeter after the session ends.
+            }
+            Err(e) => {
+                error!("Failed to launch greeter '{}': {}", greeter_path, e);
+                error!("Is bedm-greeter installed at {}?", greeter_path);
+                return;
+            }
         }
     }
 }
