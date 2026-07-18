@@ -23,7 +23,7 @@ smithay = { git = "https://github.com/Smithay/smithay.git", rev = "82912edf", de
     "wayland_frontend",
 ] }
 
-wayland-protocols = { version = "0.31", features = ["server"] }
+wayland-protocols = { version = "0.31", features = ["server", "staging", "unstable"] }
 wayland-server = "0.31"
 calloop = { version = "0.14", features = ["executor"] }
 tracing = "0.1"
