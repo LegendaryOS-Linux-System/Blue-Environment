@@ -1,0 +1,28 @@
+<script lang="ts">
+  import { Folder, Image, Music, Video, FileText, Archive, Code, File } from 'lucide-svelte';
+  import type { FileEntry } from './types';
+
+  export let file: FileEntry;
+  export let size = 40;
+
+  $: ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  $: codeExt = ['rs', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'c', 'cpp'].includes(ext);
+</script>
+
+{#if file.is_dir}
+  <Folder {size} class="text-blue-400" />
+{:else if file.mime_type.startsWith('image/')}
+  <Image {size} class="text-green-400" />
+{:else if file.mime_type.startsWith('audio/')}
+  <Music {size} class="text-purple-400" />
+{:else if file.mime_type.startsWith('video/')}
+  <Video {size} class="text-red-400" />
+{:else if file.mime_type.startsWith('text/') || file.mime_type.includes('json') || file.mime_type.includes('xml')}
+  <FileText {size} class="text-yellow-400" />
+{:else if file.mime_type.includes('zip') || file.mime_type.includes('tar') || file.mime_type.includes('gz')}
+  <Archive {size} class="text-orange-400" />
+{:else if codeExt}
+  <Code {size} class="text-cyan-400" />
+{:else}
+  <File {size} class="text-slate-400" />
+{/if}
