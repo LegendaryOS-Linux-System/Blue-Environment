@@ -28,7 +28,19 @@
     "fs:allow-remove",
     "fs:allow-copy-file",
     "fs:allow-rename",
-    "fs:scope",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$HOME/**",
+        "/etc/**",
+        "/usr/share/**",
+        "/var/**",
+        "/run/**",
+        "/tmp/**",
+        "/sys/**",
+        "/proc/**"
+      ]
+    },
     "shell:default",
     "shell:allow-open",
     "dialog:default",
