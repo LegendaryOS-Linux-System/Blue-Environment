@@ -6,10 +6,6 @@ authors = ["LegendaryOS Team <legendaryos.linux.system@gmail.com>"]
 edition = "2021"
 rust-version = "1.77"
 
-[lib]
-name = "blue_environment_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [[bin]]
 name = "blue-environment"
 path = "src/main.rs"
@@ -18,7 +14,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri                          = { version = "2", features = ["image-png", "devtools"] }
+tauri                          = { version = "2", features = ["protocol-asset", "image-png", "devtools"] }
 tauri-plugin-fs                = "2"
 tauri-plugin-shell             = "2"
 tauri-plugin-dialog            = "2"
@@ -34,7 +30,11 @@ tokio                          = { version = "1", features = ["full"] }
 tracing                        = "0.1"
 tracing-subscriber             = { version = "0.3", features = ["env-filter"] }
 dirs                           = "5.0"
+sha2                           = "0.10"
 chrono                         = { version = "0.4", features = ["serde"] }
+urlencoding                    = "2"
+# Inherit workspace pin (time =0.3.36) — cookie 0.18 needs the 1-arg parse API
+time                           = { workspace = true }
 uuid                           = { version = "1", features = ["v4"] }
 glob                           = "0.3"
 base64                         = "0.21"
