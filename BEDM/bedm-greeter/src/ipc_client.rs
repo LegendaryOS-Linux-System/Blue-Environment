@@ -42,6 +42,8 @@ enum Request<'a> {
     GetSessions,
     GetUsers,
     Authenticate { username: &'a str, password: &'a str },
+    PatternAuth   { username: &'a str, pattern: &'a [u8] },
+    FingerprintAuth { username: &'a str },
     StartSession  { username: &'a str, session: &'a str, env: Option<Vec<(String, String)>> },
     PowerAction   { action: &'a str },
     Cancel,
@@ -101,6 +103,34 @@ impl BedmClient {
         -> Result<crate::AuthResult, String>
     {
         self.send(&Request::Authenticate { username, password }).await?;
+        match self.read_response().await? {
+            Response::AuthSuccess { username } => Ok(crate::AuthResult {
+                success: true, username: Some(username), error: None, attempts_left: 5 }),
+            Response::AuthFailure { reason, attempts_left } => Ok(crate::AuthResult {
+                success: false, username: None, error: Some(reason), attempts_left }),
+            Response::Error { message } => Err(message),
+            _ => Err("Unexpected auth response".to_string()),
+        }
+    }
+
+    pub async fn authenticate_pattern(&mut self, username: &str, pattern: &[u8])
+        -> Result<crate::AuthResult, String>
+    {
+        self.send(&Request::PatternAuth { username, pattern }).await?;
+        match self.read_response().await? {
+            Response::AuthSuccess { username } => Ok(crate::AuthResult {
+                success: true, username: Some(username), error: None, attempts_left: 5 }),
+            Response::AuthFailure { reason, attempts_left } => Ok(crate::AuthResult {
+                success: false, username: None, error: Some(reason), attempts_left }),
+            Response::Error { message } => Err(message),
+            _ => Err("Unexpected auth response".to_string()),
+        }
+    }
+
+    pub async fn authenticate_fingerprint(&mut self, username: &str)
+        -> Result<crate::AuthResult, String>
+    {
+        self.send(&Request::FingerprintAuth { username }).await?;
         match self.read_response().await? {
             Response::AuthSuccess { username } => Ok(crate::AuthResult {
                 success: true, username: Some(username), error: None, attempts_left: 5 }),
