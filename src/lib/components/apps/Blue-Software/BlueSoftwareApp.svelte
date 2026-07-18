@@ -1,0 +1,111 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { Package, RefreshCw, Search, LayoutGrid, List, AlertCircle, Loader2, X } from 'lucide-svelte';
+  import type { SoftwareTab, ViewMode, PackageInfo } from './types';
+  import { createPackages } from './usePackages';
+  import PackageCard from './PackageCard.svelte';
+  import PackageRow from './PackageRow.svelte';
+  import InstallLogTerminal from './InstallLogTerminal.svelte';
+
+  const { packages, loading, error, activeAction, installLog, loadPackages, performAction, closeLog } = createPackages();
+
+  let activeTab: SoftwareTab = 'available';
+  let searchQuery = '';
+  let viewMode: ViewMode = 'grid';
+
+  onMount(loadPackages);
+
+  $: filtered = $packages.filter((p) => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch = !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
+    if (activeTab === 'available') return matchSearch && !p.installed;
+    if (activeTab === 'installed') return matchSearch && p.installed;
+    if (activeTab === 'updates') return matchSearch && p.installed && p.update_available;
+    return matchSearch;
+  });
+
+  $: installed = $packages.filter((p) => p.installed).length;
+  $: updates = $packages.filter((p) => p.installed && p.update_available).length;
+
+  const tabs: { id: SoftwareTab; label: (pkgs: PackageInfo[]) => string }[] = [
+    { id: 'available', label: (pkgs) => `Available (${pkgs.filter((p) => !p.installed).length})` },
+    { id: 'installed', label: () => `Installed (${installed})` },
+    { id: 'updates', label: () => `Updates (${updates})` },
+  ];
+</script>
+
+<div class="flex flex-col h-full bg-slate-900 text-white">
+  <div class="p-4 border-b border-white/5 shrink-0">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <Package size={26} class="text-blue-400" />
+        <h1 class="text-xl font-bold">Blue Software</h1>
+      </div>
+      <button on:click={loadPackages} disabled={$loading} class="p-2 hover:bg-white/10 rounded-full transition-colors disabled:opacity-50">
+        <RefreshCw size={16} class={$loading ? 'animate-spin' : ''} />
+      </button>
+    </div>
+
+    <div class="flex gap-0 border-b border-white/10 mb-3">
+      {#each tabs as t (t.id)}
+        <button on:click={() => (activeTab = t.id)}
+          class="px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px {activeTab === t.id ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}">
+          {t.label($packages)}
+          {#if t.id === 'updates' && updates > 0}
+            <span class="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] bg-orange-500/20 text-orange-300">{updates}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+
+    <div class="flex items-center gap-3">
+      <div class="relative flex-1">
+        <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input type="text" placeholder="Search packages…" bind:value={searchQuery}
+          class="w-full bg-slate-800 border border-white/10 rounded-lg py-2 pl-9 pr-4 text-sm text-white focus:outline-none focus:border-blue-500/50" />
+      </div>
+      <div class="flex gap-1 bg-slate-800 rounded-lg p-1">
+        <button on:click={() => (viewMode = 'grid')} class="p-1.5 rounded {viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-white/10'}"><LayoutGrid size={15} /></button>
+        <button on:click={() => (viewMode = 'list')} class="p-1.5 rounded {viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-white/10'}"><List size={15} /></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex-1 overflow-y-auto p-4">
+    {#if $error}
+      <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-3 mb-4 flex items-center gap-2 text-red-400 text-sm">
+        <AlertCircle size={15} /> {$error}
+        <button on:click={() => error.set(null)} class="ml-auto"><X size={14} /></button>
+      </div>
+    {/if}
+
+    {#if $loading && filtered.length === 0}
+      <div class="flex items-center justify-center h-48"><Loader2 size={28} class="animate-spin text-blue-400" /></div>
+    {:else if filtered.length === 0}
+      <div class="text-center py-16 text-slate-500">
+        <Package size={40} class="mx-auto mb-3 opacity-40" />
+        <p class="text-sm">No packages found</p>
+        {#if activeTab === 'updates'}<p class="text-xs mt-1 text-slate-600">Everything is up to date</p>{/if}
+        {#if activeTab === 'available' && !$loading}
+          <p class="text-xs mt-1 text-slate-600">No packages returned — make sure apt/flatpak/snap is reachable and try refreshing.</p>
+        {/if}
+      </div>
+    {:else if viewMode === 'grid'}
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {#each filtered as pkg (`${pkg.source}-${pkg.id}`)}
+          <PackageCard {pkg} tab={activeTab} busy={$activeAction === pkg.id} on:action={(e) => performAction(pkg, e.detail)} />
+        {/each}
+      </div>
+    {:else}
+      <div class="space-y-1">
+        {#each filtered as pkg (`${pkg.source}-${pkg.id}`)}
+          <PackageRow {pkg} tab={activeTab} busy={$activeAction === pkg.id} on:action={(e) => performAction(pkg, e.detail)} />
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  {#if $installLog}
+    <InstallLogTerminal log={$installLog} on:close={closeLog} />
+  {/if}
+</div>
