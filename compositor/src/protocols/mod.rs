@@ -1,5 +1,8 @@
 pub mod idle;
 pub mod hotplug;
+pub mod decoration;
+pub mod cursor_shape;
+pub mod session_lock;
 
 use smithay::{
     delegate_xdg_activation,
