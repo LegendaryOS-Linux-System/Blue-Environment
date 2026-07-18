@@ -1,0 +1,17 @@
+Source: blue-environment
+Section: x11
+Priority: optional
+Maintainer: LegendaryOS Team <legendaryos.linux.system@gmail.com>
+Build-Depends: debhelper-compat (= 13), cargo, nodejs (>= 18), npm
+Standards-Version: 4.6.2
+Homepage: https://github.com/HackerOS-Linux-System/Blue-Environment
+
+Package: blue-environment
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}, ruby (>= 2.7)
+Recommends: bedm
+Description: Blue Environment Wayland desktop shell
+ Blue Environment is a production Wayland desktop shell built with
+ Smithay, Tauri and Svelte.
+ .
+ Developed by the LegendaryOS Team.
