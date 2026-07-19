@@ -67,7 +67,52 @@ export async function getAvailableModes(): Promise<{ resolution: string; rates: 
   ];
 }
 
-export async function applyNightLight(enabled: boolean, tempK: number): Promise<void> {
+export interface GeoCoords { lat: number; lon: number; }
+
+/** Resolve the browser's geolocation, falling back to null if denied/unavailable. */
+export function getGeoLocation(): Promise<GeoCoords | null> {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) { resolve(null); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => resolve(null),
+      { timeout: 4000, maximumAge: 6 * 60 * 60 * 1000 }
+    );
+  });
+}
+
+/**
+ * Approximate sunrise/sunset (local 24h "HH:MM") for a given latitude/longitude and date,
+ * using the standard NOAA solar-position approximation. Good enough for UI display; the
+ * compositor-side daemon (wlsunset/gammastep -l) recomputes precisely every day on its own.
+ */
+export function computeSunTimes(lat: number, lon: number, date = new Date()): { sunrise: string; sunset: string } {
+  const rad = Math.PI / 180;
+  const dayOfYear = Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(date.getFullYear(), 0, 0)) / 86400000);
+  const declination = 23.44 * rad * Math.sin(rad * (360 / 365) * (dayOfYear - 81));
+  const latRad = lat * rad;
+  const cosHourAngle = -Math.tan(latRad) * Math.tan(declination);
+  const clamped = Math.max(-1, Math.min(1, cosHourAngle));
+  const hourAngle = Math.acos(clamped) / rad; // degrees
+  const solarNoonUtc = 12 - lon / 15;
+  const sunriseUtc = solarNoonUtc - hourAngle / 15;
+  const sunsetUtc = solarNoonUtc + hourAngle / 15;
+  const fmt = (h: number) => {
+    const norm = ((h % 24) + 24) % 24;
+    const hh = Math.floor(norm);
+    const mm = Math.round((norm - hh) * 60);
+    return `${String(hh).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+  };
+  const offsetH = -date.getTimezoneOffset() / 60;
+  return { sunrise: fmt(sunriseUtc + offsetH), sunset: fmt(sunsetUtc + offsetH) };
+}
+
+export async function applyNightLight(
+  enabled: boolean,
+  tempK: number,
+  schedule: 'manual' | 'sunset' = 'manual',
+  geo?: GeoCoords | null
+): Promise<void> {
   await SystemBridge.executeCommand(`pkill -f wlsunset 2>/dev/null; pkill -f gammastep 2>/dev/null; pkill -f redshift 2>/dev/null; true`);
   if (!enabled) {
     const o = await SystemBridge.executeCommand(`xrandr | grep ' connected' | head -1 | cut -d' ' -f1`);
@@ -76,11 +121,41 @@ export async function applyNightLight(enabled: boolean, tempK: number): Promise<
     return;
   }
   const session = await SystemBridge.getSessionType();
+  const dayTemp = 6500;
+  const nightTemp = tempK;
+
+  if (schedule === 'sunset' && geo) {
+    // Location-based mode: hand full solar scheduling to the color-temperature daemon itself
+    // (wlsunset -l/-L and gammastep -l both recompute sunrise/sunset every day from lat/lon).
+    if (session.startsWith('wayland')) {
+      await SystemBridge.executeCommand(`wlsunset -l ${geo.lat} -L ${geo.lon} -T ${dayTemp} -t ${nightTemp} &`);
+    } else {
+      await SystemBridge.executeCommand(
+        `which gammastep >/dev/null 2>&1 && gammastep -l ${geo.lat}:${geo.lon} -t ${dayTemp}:${nightTemp} & || which redshift >/dev/null 2>&1 && redshift -l ${geo.lat}:${geo.lon} -t ${dayTemp}:${nightTemp} & || true`
+      );
+    }
+    return;
+  }
+
+  if (schedule === 'sunset' && !geo) {
+    // No location permission granted: fall back to a fixed civil-twilight approximation
+    // (19:00-07:00) instead of silently doing nothing.
+    if (session.startsWith('wayland')) {
+      await SystemBridge.executeCommand(`wlsunset -t ${nightTemp} -T ${dayTemp} -S 07:00 -s 19:00 &`);
+    } else {
+      await SystemBridge.executeCommand(
+        `which gammastep >/dev/null 2>&1 && gammastep -O ${nightTemp} & || which redshift >/dev/null 2>&1 && redshift -O ${nightTemp} & || true`
+      );
+    }
+    return;
+  }
+
+  // Manual: always-on fixed temperature (previous default behaviour).
   if (session.startsWith('wayland')) {
-    await SystemBridge.executeCommand(`wlsunset -T ${tempK} -t ${Math.max(1000, tempK - 2500)} &`);
+    await SystemBridge.executeCommand(`wlsunset -T ${nightTemp} -t ${Math.max(1000, nightTemp - 2500)} &`);
   } else {
     await SystemBridge.executeCommand(
-      `which gammastep >/dev/null 2>&1 && gammastep -O ${tempK} & || which redshift >/dev/null 2>&1 && redshift -O ${tempK} & || true`
+      `which gammastep >/dev/null 2>&1 && gammastep -O ${nightTemp} & || which redshift >/dev/null 2>&1 && redshift -O ${nightTemp} & || true`
     );
   }
 }
