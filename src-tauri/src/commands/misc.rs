@@ -249,62 +249,34 @@ pub fn notifications_path() -> PathBuf {
 }
 
 // ── Security: pattern lock + fingerprint status (Settings → Security) ──────
-// Mirrors BEDM's own pattern hashing exactly (see
-// BEDM/bedm-daemon/src/pam_auth.rs::hash_pattern) so a pattern set from
-// inside a running desktop session is immediately usable at the next BEDM
-// login — same file, same algorithm, no daemon restart needed.
-
-fn pattern_hash_path(home: &str) -> PathBuf {
-    PathBuf::from(home).join(".config/Blue-Environment/pattern.hash")
-}
-
-fn hash_pattern(username: &str, pattern: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(username.as_bytes());
-    hasher.update(b":");
-    hasher.update(pattern);
-    format!("{:x}", hasher.finalize())
-}
+// Hashing, storage path, verification and the fprintd check all live in the
+// shared `blue-auth` crate now, so a pattern set from inside a running
+// desktop session is immediately usable at the next BEDM login — same file,
+// same algorithm, guaranteed by the type system rather than by three people
+// remembering to keep three copies in sync.
 
 #[tauri::command]
 pub fn save_pattern_lock(username: String, pattern: Vec<u8>) -> Result<(), String> {
-    if pattern.len() < 4 {
-        return Err("Pattern too short".to_string());
-    }
     let home = dirs::home_dir().ok_or("No home directory")?;
-    let path = pattern_hash_path(home.to_str().unwrap_or("/tmp"));
-    fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::write(&path, hash_pattern(&username, &pattern)).map_err(|e| e.to_string())?;
-    Ok(())
+    blue_auth::save_pattern(&username, &home, &pattern)
 }
 
 #[tauri::command]
 pub fn delete_pattern_lock(username: String) -> Result<(), String> {
     let _ = username;
     let home = dirs::home_dir().ok_or("No home directory")?;
-    let path = pattern_hash_path(home.to_str().unwrap_or("/tmp"));
-    let _ = fs::remove_file(path);
-    Ok(())
+    blue_auth::delete_pattern(&home)
 }
 
 #[tauri::command]
 pub fn pattern_is_configured(username: String, home: String) -> bool {
     let _ = username;
-    pattern_hash_path(&home).exists()
+    blue_auth::pattern_is_configured(&home)
 }
 
-/// Same fprintd check BEDM's greeter uses (see
-/// BEDM/bedm-greeter/src/main.rs::has_fingerprint) — duplicated here rather
-/// than shared since BEDM and the main desktop session are separate Tauri
-/// apps/crates with no code-sharing mechanism between them currently (see
-/// STATUS.md "shell" gaps for the follow-up: extract a shared `blue-auth`
-/// crate instead of this kind of copy).
+/// Same fprintd check BEDM's greeter uses — both now call into the shared
+/// `blue-auth` crate instead of maintaining separate copies of the logic.
 #[tauri::command]
 pub fn has_fingerprint(username: String) -> bool {
-    Command::new("fprintd-list")
-        .arg(&username)
-        .output()
-        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("no fingers"))
-        .unwrap_or(false)
+    blue_auth::has_fingerprint(&username)
 }
