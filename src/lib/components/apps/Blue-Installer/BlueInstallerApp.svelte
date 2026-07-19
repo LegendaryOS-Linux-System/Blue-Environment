@@ -27,7 +27,7 @@
     $step === 'welcome' ? true :
     $step === 'language' ? true :
     $step === 'keyboard' ? true :
-    $step === 'disk' ? !!$config.disk :
+    $step === 'disk' ? !!$config.disk && ($config.diskMode === 'erase' || !state.validatePartitionPlan($config.partitions)) :
     $step === 'account' ? !!$config.username && !!$config.password : false;
 </script>
 
