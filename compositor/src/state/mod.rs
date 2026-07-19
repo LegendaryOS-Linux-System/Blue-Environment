@@ -177,8 +177,25 @@ pub struct BlueState {
     pub xwayland:             Option<XWayland>,
     pub xwm:                  Option<X11Wm>,
     pub x11_display:          Option<u32>,
+    /// Backing state for the `xwayland-shell-v1` protocol (lets Smithay associate
+    /// wl_surfaces created by XWayland with their X11 window before the WM takes
+    /// over). Previously this didn't exist on BlueState and
+    /// `XWaylandShellHandler::xwayland_shell_state` reached for `self`'s own
+    /// memory via an unsafe transmute as a stopgap — see xwayland/mod.rs history.
+    pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
+    /// The Wayland `Client` handle for the XWayland server process, captured
+    /// from `XWayland::spawn`'s return value and consumed once
+    /// `XWaylandEvent::Ready` arrives (to start the X11 window manager via
+    /// `X11Wm::start_wm`). Previously parked in a `thread_local!` in
+    /// xwayland/mod.rs because BlueState had nowhere to put it.
+    pub x11_client:           Option<smithay::reexports::wayland_server::Client>,
     pub xdg_activation_state: XdgActivationState,
     pub is_idle:              bool,
+    /// Backing state for `idle-inhibit-unstable-v1` (see protocols/idle_inhibit.rs).
+    pub idle_inhibit_state:      smithay::wayland::idle_inhibit::IdleInhibitManagerState,
+    /// Surfaces currently holding an idle inhibitor. `protocols/idle.rs`'s
+    /// DPMS timer should skip blanking while `is_idle_inhibited()` is true.
+    pub idle_inhibiting_surfaces: Vec<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
 
     // Backend
     pub backend_data: BackendData,
@@ -295,8 +312,12 @@ impl BlueState {
             xwayland:             None,
             xwm:                  None,
             x11_display:          None,
+            xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState::new::<BlueState>(&display_handle_for_activation),
+            x11_client:           None,
             xdg_activation_state: XdgActivationState::new::<BlueState>(&display_handle_for_activation),
             is_idle:              false,
+            idle_inhibit_state: smithay::wayland::idle_inhibit::IdleInhibitManagerState::new::<BlueState>(&display_handle_for_activation),
+            idle_inhibiting_surfaces: Vec::new(),
             backend_data: BackendData::None,
             ipc_windows: Arc::new(Mutex::new(Vec::new())),
             clients: Arc::new(Mutex::new(Vec::new())),
