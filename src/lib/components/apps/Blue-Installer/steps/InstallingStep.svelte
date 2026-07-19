@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Loader2 } from 'lucide-svelte';
   import type { InstallState } from '../installState';
-  import { tauriListen } from '../../terminal/tauriBridge';
+  import { tauriListen } from '../../Terminal-App/tauriBridge';
 
   export let state: InstallState;
   const { progressPct, progressLabel, installLog } = state;
