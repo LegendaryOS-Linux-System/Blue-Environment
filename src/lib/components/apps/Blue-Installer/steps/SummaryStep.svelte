@@ -19,6 +19,7 @@
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Language</span><span class="text-white">{localeLabel}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Keyboard</span><span class="text-white">{kbLabel}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Disk</span><span class="text-white font-mono">{$config.disk?.path ?? '—'} ({$config.disk?.sizeLabel})</span></div>
+    <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Partitioning</span><span class="text-white">{$config.diskMode === 'manual' ? `Manual (${$config.partitions.length} partitions)` : 'Erase disk (automatic)'}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Computer name</span><span class="text-white">{$config.hostname}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">User</span><span class="text-white">{$config.fullName || $config.username} ({$config.username})</span></div>
     <div class="flex justify-between text-sm py-1.5"><span class="text-slate-500">Auto-login</span><span class="text-white">{$config.autoLogin ? 'Yes' : 'No'}</span></div>
