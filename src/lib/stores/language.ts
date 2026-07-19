@@ -8,15 +8,26 @@ import { spanish } from '../translations/spanish';
 import { russian } from '../translations/russian';
 import { ukrainian } from '../translations/ukrainian';
 import { czech } from '../translations/czech';
+import { italian } from '../translations/italian';
+import { portuguese } from '../translations/portuguese';
+import { dutch } from '../translations/dutch';
+import { swedish } from '../translations/swedish';
+import { turkish } from '../translations/turkish';
+import { japanese } from '../translations/japanese';
+import { chinese } from '../translations/chinese';
+import { arabic } from '../translations/arabic';
 import type { Translations } from '../translations/types';
 
-export type Language = 'en' | 'pl' | 'de' | 'fr' | 'es' | 'ru' | 'uk' | 'cs';
+export type Language = 'en' | 'pl' | 'de' | 'fr' | 'es' | 'ru' | 'uk' | 'cs'
+  | 'it' | 'pt' | 'nl' | 'sv' | 'tr' | 'ja' | 'zh' | 'ar';
 
 export interface LanguageMeta {
   code: Language;
   name: string;
   nativeName: string;
   flag: string;
+  /** Right-to-left script (currently only Arabic) — consumers can use this to set `dir="rtl"`. */
+  rtl?: boolean;
 }
 
 export const SUPPORTED_LANGUAGES: LanguageMeta[] = [
@@ -28,6 +39,14 @@ export const SUPPORTED_LANGUAGES: LanguageMeta[] = [
   { code: 'ru', name: 'Russian', nativeName: 'Russkiy', flag: 'RU' },
   { code: 'uk', name: 'Ukrainian', nativeName: 'Ukrayinska', flag: 'UA' },
   { code: 'cs', name: 'Czech', nativeName: 'Cestina', flag: 'CS' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: 'IT' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Portugues', flag: 'PT' },
+  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: 'NL' },
+  { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: 'SE' },
+  { code: 'tr', name: 'Turkish', nativeName: 'Turkce', flag: 'TR' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: 'JP' },
+  { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文', flag: 'CN' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: 'SA', rtl: true },
 ];
 
 const LANGUAGE_MAP: Record<Language, Translations> = {
@@ -39,6 +58,14 @@ const LANGUAGE_MAP: Record<Language, Translations> = {
   ru: russian,
   uk: ukrainian,
   cs: czech,
+  it: italian,
+  pt: portuguese,
+  nl: dutch,
+  sv: swedish,
+  tr: turkish,
+  ja: japanese,
+  zh: chinese,
+  ar: arabic,
 };
 
 function detectLocale(): Language {
