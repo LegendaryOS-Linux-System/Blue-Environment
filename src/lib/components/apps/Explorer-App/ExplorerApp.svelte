@@ -6,9 +6,11 @@
     Music, Video, FileText, Download, ChevronRight,
     Grid, List, Eye, X, Edit, Search,
     SortAsc, SortDesc, Columns, Info, Check, AlertCircle, Loader2,
+    Star, StarOff, Archive as ArchiveIcon, FileBox,
   } from 'lucide-svelte';
   import { SystemBridge } from '../../../utils/systemBridge';
   import { dialogPrompt, dialogConfirm } from '../../../stores/dialog';
+  import { configStore } from '../../../utils/configStore';
   import type { FileEntry, Tab, Notif, SortKey } from './types';
   import { BOOKMARKS } from './types';
   import FileIcon from './FileIcon.svelte';
@@ -16,6 +18,56 @@
 
   const BM_ICONS: Record<string, any> = { Home, Folder, FileText, Download, Image, Music, Video };
   const BOOKMARKS_WITH_ICONS = BOOKMARKS.map((bm) => ({ ...bm, icon: BM_ICONS[bm.iconName] ?? Folder }));
+
+  // --- User-defined bookmarks (zakładki użytkownika) -------------------------------------
+  let customBookmarks: string[] = configStore.get().customBookmarks ?? [];
+  configStore.subscribe((cfg) => { customBookmarks = cfg.customBookmarks ?? []; });
+
+  function isCustomBookmark(path: string) { return customBookmarks.includes(path); }
+
+  async function toggleCustomBookmark(path: string) {
+    const next = isCustomBookmark(path)
+      ? customBookmarks.filter((p) => p !== path)
+      : [...customBookmarks, path];
+    customBookmarks = next;
+    await configStore.save({ customBookmarks: next });
+  }
+
+  // --- Archive preview (podgląd zawartości archiwum bez osobnej appki) ------------------
+  const ARCHIVE_EXT = ['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'zst', 'lz4', 'tgz'];
+  function isArchive(file: FileEntry) {
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    return file.mime_type.includes('zip') || file.mime_type.includes('archive') || file.mime_type.includes('compressed') || ARCHIVE_EXT.includes(ext);
+  }
+  let archiveEntries: { name: string; size?: string; is_dir?: boolean }[] | null = null;
+  let archiveLoading = false;
+  let archiveError = '';
+  async function loadArchivePreview(file: FileEntry) {
+    archiveEntries = null; archiveError = ''; archiveLoading = true;
+    try {
+      const info = await SystemBridge.invokeCommand<any>('archive_list', { path: file.path });
+      archiveEntries = info?.entries ?? info ?? [];
+      if (info?.error) archiveError = info.error;
+    } catch (e: any) {
+      archiveError = e?.message ?? String(e);
+    } finally {
+      archiveLoading = false;
+    }
+  }
+
+  // --- Properties panel (właściwości pliku) ----------------------------------------------
+  let propertiesFile: FileEntry | null = null;
+  function openProperties(file: FileEntry) { propertiesFile = file; }
+  function closeProperties() { propertiesFile = null; }
+
+  // --- Right-click context menu -----------------------------------------------------------
+  let ctxMenu: { x: number; y: number; file: FileEntry } | null = null;
+  function openContextMenu(e: MouseEvent, file: FileEntry) {
+    e.preventDefault();
+    if (!selected.has(file.path)) selected = new Set([file.path]);
+    ctxMenu = { x: e.clientX, y: e.clientY, file };
+  }
+  function closeContextMenu() { ctxMenu = null; }
 
   let tabs: Tab[] = [{ id: 'tab-1', path: 'HOME', history: ['HOME'], historyIndex: 0 }];
   let activeTabId = 'tab-1';
@@ -178,9 +230,15 @@
 
   async function openPreview(file: FileEntry) {
     previewFile = file; previewLoading = true;
+    archiveEntries = null; archiveError = '';
     try {
-      if (file.mime_type.startsWith('image/')) previewContent = (await SystemBridge.readFileAsDataURL(file.path)) ?? '';
-      else previewContent = await SystemBridge.readFile(file.path);
+      if (isArchive(file)) {
+        await loadArchivePreview(file);
+      } else if (file.mime_type.startsWith('image/')) {
+        previewContent = (await SystemBridge.readFileAsDataURL(file.path)) ?? '';
+      } else {
+        previewContent = await SystemBridge.readFile(file.path);
+      }
     } catch { previewContent = ''; }
     finally { previewLoading = false; }
   }
@@ -257,6 +315,11 @@
     if (e.key === 'Escape') { searchTerm = ''; showSearch = false; selected = new Set(); }
   }
   onMount(() => window.addEventListener('keydown', handleKeyDown));
+  onMount(() => {
+    const closeCtx = () => (ctxMenu = null);
+    window.addEventListener('click', closeCtx);
+    return () => window.removeEventListener('click', closeCtx);
+  });
   onDestroy(() => window.removeEventListener('keydown', handleKeyDown));
 
   $: breadcrumbs = activeTab.path.split('/').map((part, i, arr) => ({
@@ -276,7 +339,12 @@
   </div>
 
   <div class="w-44 bg-slate-800/50 border-r border-white/5 flex flex-col shrink-0">
-    <div class="p-3 border-b border-white/5"><span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Places</span></div>
+    <div class="p-3 border-b border-white/5 flex items-center justify-between">
+      <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Places</span>
+      <button on:click={() => toggleCustomBookmark(activeTab.path)} title="Bookmark current folder" class="p-0.5 hover:text-yellow-400 text-slate-500">
+        {#if isCustomBookmark(activeTab.path)}<Star size={13} class="text-yellow-400 fill-yellow-400" />{:else}<Star size={13} />{/if}
+      </button>
+    </div>
     <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
       {#each BOOKMARKS_WITH_ICONS as bm (bm.path)}
         <button on:click={() => navigateTo(bm.path)} class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors {activeTab.path === bm.path ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-white'}">
@@ -287,6 +355,18 @@
       <button on:click={() => navigateTo('/')} class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-400 hover:bg-white/5 hover:text-white">
         <HardDrive size={14} /> / (root)
       </button>
+      {#if customBookmarks.length}
+        <div class="h-px bg-white/5 my-2" />
+        <div class="px-2 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Bookmarks</div>
+        {#each customBookmarks as path (path)}
+          <div class="group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors {activeTab.path === path ? 'bg-blue-600/20 text-blue-400' : 'text-slate-400 hover:bg-white/5 hover:text-white'}">
+            <button on:click={() => navigateTo(path)} class="flex items-center gap-2 flex-1 min-w-0 text-left">
+              <Folder size={14} class="shrink-0" /><span class="truncate">{path.split('/').pop()}</span>
+            </button>
+            <button on:click={() => toggleCustomBookmark(path)} class="opacity-0 group-hover:opacity-100 hover:text-red-400 shrink-0"><X size={11} /></button>
+          </div>
+        {/each}
+      {/if}
     </div>
   </div>
 
@@ -362,7 +442,8 @@
                 on:dragleave={() => (dragOver = null)}
                 class="relative flex flex-col items-center p-2 rounded-xl cursor-pointer transition-colors duration-100 select-none {isSel ? 'bg-blue-600/30 ring-2 ring-blue-500/60' : 'hover:bg-white/5'} {isDragTgt ? 'bg-blue-500/20 ring-2 ring-blue-400' : ''} {isCut ? 'opacity-50' : ''}"
                 on:click|stopPropagation={(e) => toggleSelect(file.path, e)}
-                on:dblclick={() => !renaming && handleOpen(file)}>
+                on:dblclick={() => !renaming && handleOpen(file)}
+                on:contextmenu|stopPropagation={(e) => openContextMenu(e, file)}>
                 <div class="mb-1.5">
                   {#if file.mime_type.startsWith('image/') && thumbnails[file.path]}
                     <img src={thumbnails[file.path]} alt={file.name} class="w-12 h-12 object-cover rounded-lg" />
@@ -405,7 +486,8 @@
                   on:dragleave={() => (dragOver = null)}
                   class="border-b border-white/5 cursor-pointer group {isSel ? 'bg-blue-600/20' : 'hover:bg-white/5'} {isDragTgt ? 'bg-blue-500/15' : ''} {isCut ? 'opacity-50' : ''}"
                   on:click={(e) => toggleSelect(file.path, e)}
-                  on:dblclick={() => handleOpen(file)}>
+                  on:dblclick={() => handleOpen(file)}
+                  on:contextmenu|preventDefault={(e) => openContextMenu(e, file)}>
                   <td class="p-2">
                     <div class="flex items-center gap-2 min-w-0">
                       {#if file.mime_type.startsWith('image/') && thumbnails[file.path]}
@@ -450,7 +532,27 @@
               <div>Size: {pf.size}</div>
               <div>Modified: {pf.modified ?? '—'}</div>
             </div>
-            {#if previewLoading}
+            {#if isArchive(pf)}
+              <!-- Blue Archive integration: preview archive contents inline, no separate app needed -->
+              <div class="flex items-center gap-1.5 text-[10px] text-blue-400 mb-1.5"><ArchiveIcon size={12} /> Archive contents</div>
+              {#if archiveLoading}
+                <Loader2 size={16} class="animate-spin text-blue-400" />
+              {:else if archiveError}
+                <div class="text-[10px] text-red-400">{archiveError}</div>
+              {:else if archiveEntries && archiveEntries.length}
+                <ul class="space-y-0.5 max-h-64 overflow-auto">
+                  {#each archiveEntries as entry (entry.name)}
+                    <li class="flex items-center gap-1.5 text-[10px] text-slate-300 truncate">
+                      {#if entry.is_dir}<Folder size={11} class="text-slate-500 shrink-0" />{:else}<FileBox size={11} class="text-slate-500 shrink-0" />{/if}
+                      <span class="truncate flex-1">{entry.name}</span>
+                      {#if entry.size}<span class="text-slate-600 shrink-0">{entry.size}</span>{/if}
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                <div class="text-center text-slate-600 text-xs py-4">Empty or unsupported archive</div>
+              {/if}
+            {:else if previewLoading}
               <Loader2 size={16} class="animate-spin text-blue-400" />
             {:else if pf.mime_type.startsWith('image/') && previewContent}
               <img src={previewContent} alt="preview" class="max-w-full rounded object-contain" />
@@ -461,9 +563,59 @@
             {/if}
           </div>
           <div class="p-2 border-t border-white/5 flex gap-1.5">
-            <button on:click={() => SystemBridge.launchApp(`xdg-open "${pf.path}"`)} class="flex-1 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs">Open</button>
+            {#if isArchive(pf)}
+              <button on:click={() => SystemBridge.invokeCommand('archive_extract', { path: pf.path, destDir: activeTab.path }).then(() => { notify('success', 'Extracted'); loadFiles(activeTab.path); }).catch(() => notify('error', 'Extraction failed'))} class="flex-1 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs">Extract here</button>
+            {:else}
+              <button on:click={() => SystemBridge.launchApp(`xdg-open "${pf.path}"`)} class="flex-1 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs">Open</button>
+            {/if}
+            <button on:click={() => openProperties(pf)} title="Properties" class="p-1.5 hover:bg-white/10 rounded"><Info size={12} /></button>
             <button on:click={() => startRename(pf)} class="p-1.5 hover:bg-white/10 rounded"><Edit size={12} /></button>
             <button on:click={() => { selected = new Set([pf.path]); deleteSelected(); previewFile = null; }} class="p-1.5 hover:bg-red-500/20 rounded text-red-400"><Trash2 size={12} /></button>
+          </div>
+        </div>
+      {/if}
+
+      {#if ctxMenu}
+        {@const cf = ctxMenu.file}
+        <div class="fixed z-[60] w-44 bg-slate-800 border border-white/10 rounded-lg shadow-2xl py-1 text-sm" style="left:{ctxMenu.x}px; top:{ctxMenu.y}px;" on:click|stopPropagation>
+          <button on:click={() => { handleOpen(cf); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><Eye size={13} /> Open</button>
+          {#if isArchive(cf)}
+            <button on:click={() => { openPreview(cf); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><ArchiveIcon size={13} /> Preview contents</button>
+          {/if}
+          <button on:click={() => { startRename(cf); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><Edit size={13} /> Rename</button>
+          <button on:click={() => { selected = new Set([cf.path]); copySelected(); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><Copy size={13} /> Copy</button>
+          <button on:click={() => { selected = new Set([cf.path]); cutSelected(); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><Scissors size={13} /> Cut</button>
+          {#if cf.is_dir}
+            <button on:click={() => { toggleCustomBookmark(cf.path); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2">
+              {#if isCustomBookmark(cf.path)}<StarOff size={13} /> Remove bookmark{:else}<Star size={13} /> Add bookmark{/if}
+            </button>
+          {/if}
+          <div class="h-px bg-white/10 my-1" />
+          <button on:click={() => { selected = new Set([cf.path]); deleteSelected(); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-red-500/20 text-red-400 flex items-center gap-2"><Trash2 size={13} /> Delete</button>
+          <div class="h-px bg-white/10 my-1" />
+          <button on:click={() => { openProperties(cf); closeContextMenu(); }} class="w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2"><Info size={13} /> Properties</button>
+        </div>
+      {/if}
+
+      {#if propertiesFile}
+        {@const pf = propertiesFile}
+        <div class="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center" on:click={closeProperties}>
+          <div class="w-80 bg-slate-800 border border-white/10 rounded-xl shadow-2xl p-4" on:click|stopPropagation>
+            <div class="flex items-center gap-2 mb-3">
+              <FileIcon file={pf} size={28} />
+              <span class="font-medium truncate">{pf.name}</span>
+              <button on:click={closeProperties} class="ml-auto p-1 hover:bg-white/10 rounded"><X size={14} /></button>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <div class="flex justify-between"><span class="text-slate-500">Type</span><span class="truncate max-w-[180px]">{pf.is_dir ? 'Folder' : (pf.mime_type || 'Unknown')}</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Location</span><span class="truncate max-w-[180px]">{pf.path.slice(0, pf.path.lastIndexOf('/')) || '/'}</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Full path</span><span class="truncate max-w-[180px]" title={pf.path}>{pf.path}</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Size</span><span>{pf.size}</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Modified</span><span>{pf.modified ?? '—'}</span></div>
+              {#if isArchive(pf)}
+                <div class="flex justify-between"><span class="text-slate-500">Archive entries</span><span>{archiveEntries?.length ?? '—'}</span></div>
+              {/if}
+            </div>
           </div>
         </div>
       {/if}
