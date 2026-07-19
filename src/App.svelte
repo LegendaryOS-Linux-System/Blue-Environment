@@ -24,7 +24,7 @@
   import ToastContainer from './lib/components/ToastContainer.svelte';
   import WorkspaceSwitcher from './lib/components/WorkspaceSwitcher.svelte';
   import DialogHost from './lib/components/DialogHost.svelte';
-  import BlueInstallerApp from './lib/components/apps/blueinstaller/BlueInstallerApp.svelte';
+  import BlueInstallerApp from './lib/components/apps/Blue-Installer/BlueInstallerApp.svelte';
   import { isLiveMode, liveModeChecked, checkLiveMode } from './lib/utils/liveMode';
   import { SystemBridge, toAssetUrl } from './lib/utils/systemBridge';
 
