@@ -33,6 +33,11 @@ const DEFAULT_CONFIG: UserConfig = {
     },
     accounts: {},
     customBookmarks: [],
+    weatherEnabled: true,
+    weatherCity: '',
+    weatherUnit: 'celsius',
+    clipboardHoverPreviewEnabled: true,
+    networkHoverInfoEnabled: true,
 };
 
 type Listener = (cfg: UserConfig) => void;
