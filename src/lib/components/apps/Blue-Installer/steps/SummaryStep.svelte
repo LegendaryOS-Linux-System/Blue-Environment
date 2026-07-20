@@ -18,6 +18,7 @@
   <div class="max-w-md space-y-2 mb-6">
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Language</span><span class="text-white">{localeLabel}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Keyboard</span><span class="text-white">{kbLabel}</span></div>
+    <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Timezone</span><span class="text-white">{$config.timezone}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Disk</span><span class="text-white font-mono">{$config.disk?.path ?? '—'} ({$config.disk?.sizeLabel})</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Partitioning</span><span class="text-white">{$config.diskMode === 'manual' ? `Manual (${$config.partitions.length} partitions)` : 'Erase disk (automatic)'}</span></div>
     <div class="flex justify-between text-sm py-1.5 border-b border-white/5"><span class="text-slate-500">Computer name</span><span class="text-white">{$config.hostname}</span></div>
