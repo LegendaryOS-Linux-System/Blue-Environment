@@ -31,6 +31,16 @@ export interface UserConfig {
     customThemes?: ThemeDefinition[];
     /** User-defined Explorer sidebar shortcuts (absolute or HOME-relative paths). */
     customBookmarks?: string[];
+    /** Show the weather widget in the TopBar (auto-detected via IP geolocation unless weatherCity is set). */
+    weatherEnabled?: boolean;
+    /** Manual city override for weather, e.g. "Katowice,PL". Empty/undefined = auto-detect via geolocation. */
+    weatherCity?: string;
+    /** Temperature unit for the weather widget. */
+    weatherUnit?: 'celsius' | 'fahrenheit';
+    /** Show a preview of the most recent clipboard entry when hovering the clipboard icon. */
+    clipboardHoverPreviewEnabled?: boolean;
+    /** Show a network speed + timezone popover when hovering the clock. */
+    networkHoverInfoEnabled?: boolean;
 }
 
 export interface PowerProfile {
