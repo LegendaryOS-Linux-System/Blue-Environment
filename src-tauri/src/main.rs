@@ -23,6 +23,8 @@ mod terminal_app;
 use terminal_app::{spawn_terminal, write_to_terminal, pty_create, pty_write, pty_resize, pty_close};
 #[path = "ExplolerApp/mod.rs"]
 mod exploler_app;
+#[path = "BluePartitionManager/mod.rs"]
+mod blue_partition_manager;
 #[path = "SettingsApp/mod.rs"]
 #[allow(non_snake_case)]
 mod SettingsApp;
@@ -148,6 +150,9 @@ fn main() {
         clipboard_copy, clipboard_paste, write_clipboard_image, save_file_from_data_url,
         translate_text,
         installer_list_disks, installer_run,
+        blue_partition_manager::bpm_list_devices, blue_partition_manager::bpm_mount,
+        blue_partition_manager::bpm_unmount, blue_partition_manager::bpm_format,
+        blue_partition_manager::bpm_set_label,
         list_icon_themes, set_icon_theme,
         has_cellular_modem, get_cellular_status, set_cellular_enabled,
         save_pattern_lock, delete_pattern_lock, pattern_is_configured, has_fingerprint,
