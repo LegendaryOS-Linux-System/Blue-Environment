@@ -15,6 +15,7 @@
   import NetworkSection from './sections/NetworkSection.svelte';
   import PowerSection from './sections/PowerSection.svelte';
   import PanelSection from './sections/PanelSection.svelte';
+  import WeatherSection from './sections/WeatherSection.svelte';
   import LanguageSection from './sections/LanguageSection.svelte';
   import NightLightSection from './sections/NightLightSection.svelte';
   import AppsSection from './sections/AppsSection.svelte';
@@ -33,6 +34,7 @@
     { id: 'personalization', label: 'Personalization', icon: Palette, group: 'Appearance' },
     { id: 'nightLight', label: 'Night Light', icon: Moon, group: 'Appearance' },
     { id: 'panel', label: 'Panel', icon: PanelTop, group: 'Appearance' },
+    { id: 'weather', label: 'Weather & Widgets', icon: Globe, group: 'Appearance' },
     { id: 'language', label: 'Language', icon: Globe, group: 'Appearance' },
     { id: 'network', label: 'Network', icon: Wifi, group: 'Network' },
     { id: 'monitors', label: 'Monitors', icon: Monitor, group: 'Hardware' },
@@ -129,6 +131,7 @@
       {:else if activeTab === 'personalization'}<PersonalizationSection />
       {:else if activeTab === 'nightLight'}<NightLightSection {config} {onSave} />
       {:else if activeTab === 'panel'}<PanelSection {config} {onSave} />
+      {:else if activeTab === 'weather'}<WeatherSection {config} {onSave} />
       {:else if activeTab === 'language'}<LanguageSection />
       {:else if activeTab === 'network'}<NetworkSection />
       {:else if activeTab === 'monitors'}<MonitorsSection />
