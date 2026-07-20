@@ -2,8 +2,15 @@ import { writable, get } from 'svelte/store';
 import { SystemBridge } from '../../../utils/systemBridge';
 import { clearLiveMode } from '../../../utils/liveMode';
 import type { InstallStep, InstallConfig, DiskInfo, PartitionPlanEntry } from './types';
+import { LOCALES, userDirNamesForLocale } from './types';
 
 function out(r: any): string { return typeof r === 'string' ? r : (r?.stdout ?? '') + (r?.stderr ?? ''); }
+
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch { return 'UTC'; }
+}
 
 /** Default two-partition layout, mirrored from blue-installer-apply.rb's hardcoded "erase" path. */
 export function defaultPartitionPlan(): PartitionPlanEntry[] {
@@ -16,10 +23,21 @@ export function defaultPartitionPlan(): PartitionPlanEntry[] {
 export function createInstallState() {
   const step = writable<InstallStep>('welcome');
   const config = writable<InstallConfig>({
-    locale: 'en_US.UTF-8', keyboardLayout: 'us', disk: null, diskMode: 'erase',
+    locale: 'en_US.UTF-8', keyboardLayout: 'us', timezone: detectTimezone(), disk: null, diskMode: 'erase',
     partitions: defaultPartitionPlan(),
     hostname: 'blue-pc', username: '', fullName: '', password: '', autoLogin: false,
   });
+
+  // When the user picks a language before touching the timezone step,
+  // jump the suggested timezone to that language's most common zone —
+  // TimezoneStep.svelte still lets them override it freely afterwards.
+  let timezoneTouched = false;
+  function suggestTimezoneForLocale(localeCode: string) {
+    if (timezoneTouched) return;
+    const locale = LOCALES.find((l) => l.code === localeCode);
+    if (locale) config.update((c) => ({ ...c, timezone: locale.defaultTz }));
+  }
+  function markTimezoneTouched() { timezoneTouched = true; }
 
   const disks = writable<DiskInfo[]>([]);
   const disksLoading = writable(false);
@@ -69,12 +87,12 @@ export function createInstallState() {
   }
 
   function next() {
-    const order: InstallStep[] = ['welcome', 'language', 'keyboard', 'disk', 'account', 'summary', 'installing', 'done'];
+    const order: InstallStep[] = ['welcome', 'language', 'keyboard', 'timezone', 'disk', 'account', 'summary', 'installing', 'done'];
     const i = order.indexOf(get(step));
     if (i >= 0 && i < order.length - 1) step.set(order[i + 1]);
   }
   function back() {
-    const order: InstallStep[] = ['welcome', 'language', 'keyboard', 'disk', 'account', 'summary'];
+    const order: InstallStep[] = ['welcome', 'language', 'keyboard', 'timezone', 'disk', 'account', 'summary'];
     const i = order.indexOf(get(step));
     if (i > 0) step.set(order[i - 1]);
   }
@@ -101,15 +119,22 @@ export function createInstallState() {
     const cfg = get(config);
     if (!cfg.disk) { installError.set('No target disk selected'); step.set('error'); return; }
 
+    const userDirs = userDirNamesForLocale(cfg.locale);
+
     const args = [
       `--disk ${cfg.disk.path}`,
       `--confirm-erase ${cfg.disk.path}`,
       `--locale ${cfg.locale}`,
       `--keyboard ${cfg.keyboardLayout}`,
+      `--timezone ${cfg.timezone || 'UTC'}`,
       `--hostname ${JSON.stringify(cfg.hostname)}`,
       `--username ${JSON.stringify(cfg.username)}`,
       `--fullname ${JSON.stringify(cfg.fullName || cfg.username)}`,
       cfg.autoLogin ? '--autologin' : '',
+      // Localized ~/Desktop, ~/Downloads, etc. names for the chosen
+      // language (e.g. Polish → "Pobrane"), created + chowned for the new
+      // user by blue-installer-apply.rb after useradd.
+      `--userdirs ${JSON.stringify(JSON.stringify(userDirs))}`,
       // Manual partitioning: hand the whole plan to the privileged backend as JSON.
       // The default "erase" mode omits this and blue-installer-apply.rb falls back
       // to its built-in two-partition (ESP + root) layout.
@@ -145,6 +170,7 @@ export function createInstallState() {
   return {
     step, config, disks, disksLoading, progressPct, progressLabel, installLog, installError,
     loadDisks, next, back, startInstall, finishAndReboot, validatePartitionPlan,
+    suggestTimezoneForLocale, markTimezoneTouched,
   };
 }
 
